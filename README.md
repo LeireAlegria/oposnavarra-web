@@ -1,38 +1,98 @@
-# OposNavarra
+# OposNavarra Web
 
-Página web estática para presentar un servicio de preparación de oposiciones.
+Frontend web de la plataforma OposNavarra, desarrollado con Next.js, React y TypeScript en App Router. Este proyecto proporciona la base ejecutable para la presentación pública, el acceso inicial y las áreas pendientes de desarrollo futuro.
 
-## Uso local
+## Objetivo del proyecto
 
-### Opción rápida
+La web sirve como capa de presentación para la plataforma de preparación de oposiciones de Navarra. En esta primera fase se deja una estructura base con:
 
-Abre el archivo `index.html` directamente en tu navegador. No requiere Node.js ni un proceso de compilación.
+- layout raíz en español
+- navegación principal accesible
+- página pública de inicio
+- rutas de referencia para acceso, área del opositor y administración
+- páginas de error y 404 con mensajes comprensibles
+- cliente HTTP centralizado para consumir la API del backend
+- pruebas automatizadas básicas con Vitest y Testing Library
 
-### Servidor local con JavaScript
+No se incluyen todavía flujos reales de autenticación, tests o administración funcional; esas partes se dejarán para specs posteriores.
 
-El proyecto funciona en el navegador con HTML, CSS y JavaScript. No necesita Python, backend ni un archivo `.env`. Para probar correctamente la página principal y la ruta `/privacy`, necesitas tener instalado [Node.js](https://nodejs.org/):
+## Requisitos
+
+- Node.js 20.9 o superior
+- npm
+
+## Instalación
 
 1. Abre una terminal en la carpeta del proyecto.
-2. Ejecuta:
+2. Instala dependencias:
 
-	```powershell
-	npx serve . -l 8000
-	```
+```bash
+npm install
+```
 
-3. Abre [http://localhost:8000/](http://localhost:8000/) en el navegador.
-4. La página de privacidad estará disponible en [http://localhost:8000/privacy/](http://localhost:8000/privacy/).
+3. Copia el ejemplo de variables de entorno:
 
-Para detener el servidor, pulsa `Ctrl+C` en la terminal. `npx` ejecuta el servidor JavaScript de forma temporal; no hace falta crear un proyecto Node ni instalar dependencias para esta web.
+```bash
+cp .env.example .env.local
+```
 
-También puedes abrir `index.html` directamente para una revisión rápida o utilizar una extensión como **Live Server** en VS Code.
+4. Ajusta las variables necesarias para tu entorno local. En esta fase inicial la variable pública de la API queda documentada en `.env.example`.
 
-## Funcionalidades actuales
+## Scripts
 
-- Página principal responsive en `index.html`.
-- Formulario de contacto gestionado en el navegador por `script.js`.
-- Página de privacidad y condiciones en `/privacy/`.
-- Estilos y diseño responsive en `styles.css`.
+```bash
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run typecheck
+npm test
+```
 
-## Publicación
+## Variables de entorno
 
-El proyecto está preparado para publicarse como sitio estático en GitHub Pages.
+El proyecto usa la variable pública:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=
+```
+
+Se deja vacía por defecto para evitar incrustar URLs de producción o secretos en el código. Cuando el backend esté disponible, se debe completar con la URL correcta del entorno de consumo.
+
+## Estructura principal
+
+- `src/app` — rutas, layouts y páginas de App Router
+- `src/components` — componentes reutilizables
+- `src/lib` — cliente HTTP y utilidades
+- `src/types` — tipos compartidos cuando haga falta
+- `specs/` — especificaciones del proyecto
+
+## Desarrollo local
+
+```bash
+npm run dev
+```
+
+Y abre la URL mostrada por Next.js, normalmente:
+
+- http://localhost:3000
+
+## Validación
+
+La base del proyecto debe poder ejecutarse con la validación mínima de la spec:
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+## Relación con el backend
+
+Este repositorio es independiente del backend. La comunicación con la API se centraliza en la librería HTTP del frontend para evitar duplicación y facilitar el manejo de errores y cancelación de peticiones.
+
+## Estado actual
+
+El proyecto está en fase de arranque inicial y se usa como base para las siguientes specs de funcionalidad de la aplicación.
