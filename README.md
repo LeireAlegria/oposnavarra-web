@@ -1,20 +1,6 @@
-# OposNavarra Web
+# OposNavarra
 
-Frontend web de la plataforma OposNavarra, desarrollado con Next.js, React y TypeScript en App Router. Este proyecto proporciona la base ejecutable para la presentación pública, el acceso inicial y las áreas pendientes de desarrollo futuro.
-
-## Objetivo del proyecto
-
-La web sirve como capa de presentación para la plataforma de preparación de oposiciones de Navarra. En esta primera fase se deja una estructura base con:
-
-- layout raíz en español
-- navegación principal accesible
-- página pública de inicio
-- rutas de referencia para acceso, área del opositor y administración
-- páginas de error y 404 con mensajes comprensibles
-- cliente HTTP centralizado para consumir la API del backend
-- pruebas automatizadas básicas con Vitest y Testing Library
-
-No se incluyen todavía flujos reales de autenticación, tests o administración funcional; esas partes se dejarán para specs posteriores.
+Aplicación de práctica de tests para oposiciones de Navarra. Este repositorio contiene la aplicación Next.js y la configuración de Supabase.
 
 ## Requisitos
 
@@ -23,76 +9,58 @@ No se incluyen todavía flujos reales de autenticación, tests o administración
 
 ## Instalación
 
-1. Abre una terminal en la carpeta del proyecto.
-2. Instala dependencias:
-
 ```bash
 npm install
 ```
 
-3. Copia el ejemplo de variables de entorno:
+En PowerShell, copia el ejemplo como archivo local:
 
-```bash
-cp .env.example .env.local
+```powershell
+Copy-Item .env.example .env.local
 ```
 
-4. Ajusta las variables necesarias para tu entorno local. En esta fase inicial la variable pública de la API queda documentada en `.env.example`.
+Configura `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` para tu proyecto local. No pongas claves privadas ni `service_role` en variables `NEXT_PUBLIC_*`.
 
-## Scripts
-
-```bash
-npm run dev
-npm run build
-npm run start
-npm run lint
-npm run typecheck
-npm test
-```
-
-## Variables de entorno
-
-El proyecto usa la variable pública:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=
-```
-
-Se deja vacía por defecto para evitar incrustar URLs de producción o secretos en el código. Cuando el backend esté disponible, se debe completar con la URL correcta del entorno de consumo.
-
-## Estructura principal
-
-- `src/app` — rutas, layouts y páginas de App Router
-- `src/components` — componentes reutilizables
-- `src/lib` — cliente HTTP y utilidades
-- `src/types` — tipos compartidos cuando haga falta
-- `specs/` — especificaciones del proyecto
-
-## Desarrollo local
+## Desarrollo
 
 ```bash
 npm run dev
 ```
 
-Y abre la URL mostrada por Next.js, normalmente:
+Abre la URL que indique Next.js, normalmente `http://localhost:3000`.
 
-- http://localhost:3000
-
-## Validación
-
-La base del proyecto debe poder ejecutarse con la validación mínima de la spec:
+## Verificaciones
 
 ```bash
-npm ci
 npm run lint
 npm run typecheck
 npm test
 npm run build
 ```
 
-## Relación con el backend
+`npm run format` formatea los archivos fuente y configuración compatibles.
 
-Este repositorio es independiente del backend. La comunicación con la API se centraliza en la librería HTTP del frontend para evitar duplicación y facilitar el manejo de errores y cancelación de peticiones.
+## Supabase
 
-## Estado actual
+La configuración local está en `supabase/config.toml` y el esquema se mantiene mediante migraciones en `supabase/migrations/`.
 
-El proyecto está en fase de arranque inicial y se usa como base para las siguientes specs de funcionalidad de la aplicación.
+Docker solo es necesario para levantar el stack local completo de Supabase:
+
+```bash
+npm run db:start
+npm run db:reset
+npm run db:test
+```
+
+También puedes trabajar sin Docker contra un proyecto Supabase dedicado para pruebas. Autentícate con `npx supabase login`, vincúlalo con `npx supabase link --project-ref <project-ref>`, aplica las migraciones con `npm run db:push` y ejecuta `npx supabase test db --linked`. No ejecutes estos tests contra producción.
+
+Para un PostgreSQL externo, define `SUPABASE_DB_URL` como una URL de conexión y pásala a la CLI. En PowerShell:
+
+```powershell
+$env:SUPABASE_DB_URL = "postgresql://usuario:contraseña@host:5432/postgres?sslmode=require"
+npm run db:test -- --db-url "$env:SUPABASE_DB_URL"
+```
+
+La URL contiene una contraseña: no la guardes en Git ni en `.env.example`. En CI, la autenticación remota puede usar `SUPABASE_ACCESS_TOKEN` y `SUPABASE_DB_PASSWORD` como secretos. Para el uso interactivo, la CLI puede solicitar autenticación y contraseña; no hacen falta variables de entorno de base de datos.
+
+La aplicación web usa `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, documentadas en `.env.example`. Son valores públicos para el cliente web y no son necesarios para aplicar migraciones o probar la base de datos.

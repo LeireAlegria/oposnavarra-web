@@ -14,7 +14,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <header className="site-header">
           <Link className="brand" href="/" aria-label="OposNavarra, inicio">
             <span className="brand-mark">ON</span>
-            <span>opos<span className="brand-accent">navarra</span></span>
+            <span>
+              opos<span className="brand-accent">navarra</span>
+            </span>
           </Link>
           <nav aria-label="Navegación principal">
             <Link href="/acceder">Acceder</Link>
