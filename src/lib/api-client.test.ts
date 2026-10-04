@@ -21,6 +21,9 @@ describe('apiFetch', () => {
 
     await apiFetch<{ ok: boolean }>('/health', { signal: controller.signal });
 
-    expect(fetch).toHaveBeenCalledWith('https://api.example.test/health', expect.objectContaining({ signal: controller.signal }));
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.test/health',
+      expect.objectContaining({ signal: controller.signal }),
+    );
   });
 });
