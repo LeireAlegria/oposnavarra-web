@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+
+import { createClient } from '@/lib/supabase/server';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -7,7 +9,13 @@ export const metadata: Metadata = {
   description: 'Plataforma para practicar tests de oposiciones de Navarra.',
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const isAuthenticated = Boolean(user && user.email_confirmed_at);
+
   return (
     <html lang="es">
       <body>
@@ -19,7 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </span>
           </Link>
           <nav aria-label="Navegación principal">
-            <Link href="/acceder">Acceder</Link>
+            {isAuthenticated ? <Link href="/plataforma">Plataforma</Link> : <Link href="/acceder">Acceder</Link>}
           </nav>
         </header>
         {children}

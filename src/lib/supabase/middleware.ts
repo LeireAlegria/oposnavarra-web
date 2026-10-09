@@ -25,7 +25,29 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  const pathname = request.nextUrl.pathname;
+  const protectedPaths = ['/plataforma', '/admin'];
+  const authPaths = ['/acceder', '/registro', '/recuperar-contrasena', '/nueva-contrasena', '/verificar-correo'];
+
+  if (protectedPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
+    if (error || !user) {
+      return NextResponse.redirect(new URL('/acceder', request.url));
+    }
+
+    if (!user.email_confirmed_at) {
+      return NextResponse.redirect(
+        new URL(`/verificar-correo?email=${encodeURIComponent(user.email ?? '')}`, request.url),
+      );
+    }
+  }
+
+  if (authPaths.includes(pathname) && user && user.email_confirmed_at) {
+    return NextResponse.redirect(new URL('/plataforma', request.url));
+  }
 
   return response;
 }
