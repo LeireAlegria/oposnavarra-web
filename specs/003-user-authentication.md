@@ -11,6 +11,7 @@ La tabla public.perfiles representará al usuario dentro de la aplicación, vinc
 - Crear public.perfiles con los campos id, rol, created_at y updated_at.
 - Crear un perfil automáticamente por cada cuenta, con rol usuario por defecto.
 - Reservar la asignación del rol admin a una operación privilegiada.
+- Mantener un único rol por perfil y una única fuente de verdad: public.perfiles.rol. No crear una tabla usuario_roles ni un segundo modelo de roles en la spec 008.
 - Registro e inicio de sesión mediante correo electrónico y contraseña.
 - Verificación obligatoria del correo antes de acceder a la plataforma.
 - Registro mínimo: correo, contraseña y confirmación de contraseña.
@@ -95,7 +96,7 @@ Si existen cuentas anteriores, la migración creará sus perfiles faltantes sin 
 RF-09. Roles de aplicación
 Los roles permitidos serán usuario y admin. Se consultará perfiles.rol mediante una identidad validada y controles del servidor o la base de datos. No se confiará en valores del navegador ni en metadatos editables por el usuario para autorizar operaciones administrativas.
 La promoción o retirada de un administrador se realizará mediante una operación privilegiada y documentada, fuera de la interfaz del MVP. El primer administrador deberá ser una cuenta existente identificada por UUID y verificada. No se incluirán contraseñas ni una cuenta administradora fija en migraciones o semillas.
-La spec 008 utilizará esta base para proteger sus páginas y operaciones. Tener rol admin no exime de autenticarse ni verificar el correo, y esta spec no concede por ese rol una suscripción para realizar tests.
+La spec 008 dependerá del modelo creado por la 003: utilizará exclusivamente public.perfiles.rol para proteger sus páginas y operaciones. Si esa columna o tabla no existe, será una dependencia pendiente de la 003, no un motivo para crear usuario_roles desde la 008. La cláusula de la 008 que propone esa tabla alternativa deberá sustituirse por esta dependencia. Tener rol admin no exime de autenticarse ni verificar el correo, y esta spec no concede por ese rol una suscripción para realizar tests.
 6. Modelo de datos
 6.1. Tabla public.perfiles
 Campo	Tipo	Restricciones y valor inicial
@@ -128,6 +129,11 @@ La validación de correo confirmado se aplicará también al acceso privado a da
 6.4. Migraciones
 Las migraciones incluirán tabla, restricciones, RLS, privilegios, funciones y triggers, actualización automática de updated_at y creación de perfiles faltantes para cuentas existentes. La configuración manual de Auth y SMTP se documentará por separado.
 Se comprobará la aplicación desde una base limpia y sobre un entorno con cuentas existentes. Las funciones privilegiadas tendrán permisos de ejecución limitados y referencias de objetos explícitas.
+6.5. Contrato de autorización con la spec 008
+Cada perfil tendrá exactamente uno de los dos roles permitidos. admin habilita las operaciones administrativas que defina la 008; no requiere una segunda fila con rol usuario.
+Las comprobaciones del servidor y las políticas RLS que necesiten identificar administradores consultarán la misma fuente: public.perfiles.rol para el UUID autenticado. Las funciones auxiliares podrán encapsular esa consulta, pero no mantendrán otra copia persistente del rol ni confiarán en una copia obsoleta almacenada en el cliente.
+La 008 podrá añadir políticas y funciones necesarias para sus operaciones, evitando recursión RLS, pero no una tabla de asignación de roles ni permisos para que el usuario modifique su rol. Un perfil ausente, un rol no reconocido o un error al comprobarlo no concederán acceso administrativo.
+Este MVP no incluye múltiples roles por usuario. Un cambio futuro a ese modelo requerirá una migración y una actualización coordinada de las specs, sustituyendo la fuente actual y evitando mantener ambas como autoridades independientes.
 7. Integración y seguridad
 - Supabase Auth será la fuente de identidad y de credenciales. No se creará un sistema propio de contraseñas, tokens o enlaces de recuperación.
 - El identificador de Supabase Auth vinculará al usuario con los datos de la aplicación. No se utilizará el correo como clave de relación.
@@ -187,6 +193,9 @@ CA-20	Supabase o la conexión fallan	Mensaje recuperable, sin falso éxito y for
 | CA-29 | Migración con cuentas anteriores | Crea perfiles faltantes sin duplicados ni sobrescritura de roles existentes |
 | CA-30 | Error del trigger durante un registro nuevo | Registro fallido sin una cuenta nueva parcialmente creada |
 | CA-31 | Cuenta verificada sin perfil por inconsistencia | No se inventa un perfil o rol en el cliente; error recuperable y operaciones dependientes del perfil bloqueadas |
+| CA-32 | Se integra el panel de la spec 008 | Todas las comprobaciones de administrador utilizan perfiles.rol; no se crea usuario_roles ni otra fuente persistente de roles |
+| CA-33 | Falta perfil, rol reconocido o comprobación de autorización | No se concede acceso administrativo |
+| CA-34 | Se cambia un rol por el mecanismo privilegiado | Las nuevas decisiones de autorización consultan el rol vigente, sin depender de una copia del navegador |
 11. Validación de implementación
 Se comprobarán los flujos completos de registro, verificación, inicio y cierre de sesión y recuperación con un entorno de pruebas de Supabase y cuentas de prueba. Se verificarán también acceso directo a rutas y datos privados, aislamiento entre dos usuarios, renovación de sesión y enlaces inválidos.
 Se verificarán también la creación transaccional del perfil, la recuperación de cuentas preexistentes, las restricciones de roles, las fechas y la imposibilidad de elevar privilegios tanto por metadatos como por solicitudes directas.
@@ -197,6 +206,7 @@ Las verificaciones automatizadas se centrarán en controles de acceso y transici
 - Integración del botón «Acceder» en la web pública.
 - Revisión de la constitución, del esquema de usuarios vigente y de las convenciones del repositorio antes de implementar. No se han adjuntado estos documentos para esta redacción.
 - Selección del proveedor SMTP antes de cerrar la configuración de producción.
+- La spec 008 debe eliminar su alternativa de crear usuario_roles y declarar dependencia de public.perfiles.rol. Esta revisión modifica la 003; no constituye una edición del documento 008.
 13. Referencias técnicas
 - Supabase: datos de usuario y creación automática de perfiles
 - Supabase: autenticación con contraseña

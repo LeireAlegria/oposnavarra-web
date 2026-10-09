@@ -1,4 +1,4 @@
-011 — Integración de pagos con Stripe
+009 — Integración de pagos con Stripe
 Proyecto: OposNavarra
 Identificador: 011-stripe-payments
 Destino en el repositorio: specs/011-stripe-payments/spec.md

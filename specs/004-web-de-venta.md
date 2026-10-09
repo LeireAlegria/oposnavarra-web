@@ -1,19 +1,21 @@
 004 — Web de venta de OposNavarra
 Estado y objetivo
-Estado: propuesta funcional lista para revisión e implementación, con los datos comerciales pendientes indicados al final.
-Presentar OposNavarra, explicar qué ofrece la plataforma de test y orientar al visitante hacia una suscripción para una convocatoria concreta. La web de venta es pública y forma parte del mismo proyecto web que la plataforma de test, con una experiencia de navegación diferenciada.
+Estado: propuesta funcional lista para revisión e implementación, actualizada al modelo de suscripción global acordado en la spec 006.
+Presentar OposNavarra, explicar qué ofrece la plataforma de test y orientar al visitante hacia una única suscripción que da acceso a todas las convocatorias disponibles en la plataforma. La web de venta es pública y forma parte del mismo proyecto web que la plataforma de test, con una experiencia de navegación diferenciada.
 Dependencias
 - 001-project-bootstrap: estructura y tecnologías del proyecto.
 - 002-database-foundation: convocatorias y catálogo académico.
 - Spec 003 de autenticación: registro, inicio de sesión y verificación obligatoria del correo mediante Supabase.
-- La compra y gestión de suscripciones se resolverán en una spec posterior.
+- 006-subscription-management: modalidades, precios, contratación y gestión de la suscripción; tablas de planes y suscripciones.
+- Spec 009 de pasarela de pago: integración del cobro y confirmación del pago.
 - La aplicación de test se resolverá en la spec 007. Esta spec describe sus funcionalidades comerciales, sin implementarlas.
 Consultar la constitución y las specs existentes antes de implementar. No modificar sus contratos como parte de esta tarea.
 Alcance
 - Cuatro páginas públicas: Inicio, Tests disponibles, Planes y Contacto.
 - Cabecera y pie comunes, navegación adaptable a móvil y botón «Acceder».
 - Catálogo inicial de una convocatoria: Administrativo de Navarra, con su denominación oficial concreta antes de publicar.
-- Presentación de planes mensual y anual asociados a una convocatoria.
+- Presentación de una suscripción global con modalidades mensual, semestral y anual.
+- Enlaces al flujo de contratación definido por la spec 006 e integrado con la pasarela de la spec 009.
 - Formulario de contacto con envío real y protección básica frente al spam.
 - Estados de carga, error y ausencia de datos cuando corresponda.
 - Accesibilidad, adaptación a distintos tamaños de pantalla y metadatos básicos por página.
@@ -46,23 +48,26 @@ Contenido
    - Selección de temas, inicialmente todos seleccionados.
    - Revisión del resultado y consulta de un histórico sencillo.
 4. Convocatoria disponible en el MVP.
-5. Resumen de los planes mensual y anual.
+5. Resumen de la suscripción y sus modalidades mensual, semestral y anual, todas con el mismo acceso al catálogo completo.
 6. Llamadas a «Ver tests disponibles» y «Ver planes».
 Reglas
 - El contenido distingue las funcionalidades disponibles de las que todavía están en preparación.
 - No presentar funciones pendientes como utilizables ni prometer aprobación de la convocatoria.
 - Los planes y funcionalidades coinciden con los mostrados en sus páginas correspondientes.
+- Explicar que una suscripción activa permite practicar en todas las convocatorias disponibles, incluidas las que se incorporen al catálogo durante su vigencia. No hay compra individual de convocatorias.
 - Los textos de producto emplean «convocatoria» como término del dominio.
 Página Tests disponibles
 Contenido
-Mostrar las convocatorias comercialmente disponibles. En el MVP se presenta una sola, correspondiente a Administrativo de Navarra. Su ficha incluye:
+Mostrar las convocatorias incluidas en la suscripción global y disponibles para practicar. En el MVP se presenta una sola, correspondiente a Administrativo de Navarra. Su ficha incluye:
 - Denominación suficiente para identificar la convocatoria exacta.
 - Descripción breve del contenido de preparación.
 - Temas incluidos, cuando exista información verificada en el catálogo.
-- Estado comercial: disponible para contratar o en preparación.
-- Acción para consultar sus planes, conservando la convocatoria seleccionada.
+- Estado del contenido: disponible en la plataforma o en preparación.
+- Acción «Ver planes» hacia la página general de Planes, sin seleccionar una convocatoria para contratar.
 Reglas
-- La disponibilidad comercial se declara explícitamente; la existencia de una convocatoria en la base de datos no implica que esté a la venta.
+- La disponibilidad del contenido se declara explícitamente; la existencia de una convocatoria en la base de datos no implica que esté publicada para practicar.
+- Una convocatoria en preparación se identifica como tal y no se anuncia como contenido ya accesible.
+- Todas las convocatorias publicadas para practicar están incluidas en cualquiera de las modalidades de suscripción. No existen precios ni suscripciones por convocatoria.
 - No publicar automáticamente todas las convocatorias de la base de datos.
 - No exponer en esta página el banco de preguntas, las respuestas correctas ni información de usuarios.
 - El catálogo podrá incorporar más convocatorias sin rediseñar la página.
@@ -70,35 +75,41 @@ Reglas
 - Si falla una consulta necesaria, mostrar un error con opción de reintento; no interpretar el fallo como catálogo vacío.
 - No incorporar filtros, buscador ni paginación para el catálogo de una sola convocatoria del MVP.
 Página Planes
-Contenido
-Presentar dos modalidades para la convocatoria seleccionada:
-Modalidad	Información necesaria
-Mensual	Precio, moneda, periodo mensual y convocatoria incluida
-Anual	Precio total anual, moneda, periodo anual y convocatoria incluida
+Modelo comercial
+Existe una única suscripción a OposNavarra. Las modalidades cambian el precio y la duración del periodo contratado; todas incluyen las mismas funcionalidades y acceso a todas las convocatorias disponibles. No se vincula la suscripción a una convocatoria.
+Modalidad	Precio total por periodo	Duración	Renovación
+Mensual	15 €	1 mes	Automática al finalizar el periodo
+Semestral	79 €	6 meses	Automática al finalizar el periodo
+Anual	120 €	12 meses	Automática al finalizar el periodo
 
 
-Ambas modalidades ofrecen las mismas funcionalidades; cambia el periodo contratado. El precio anual se muestra como importe total. Si se incluye un equivalente mensual, se identifica como referencia, sin confundirlo con un cobro mensual. Solo mostrar ahorro si se calcula a partir de precios definidos y comparables.
-Cada tarjeta identifica la convocatoria y explica que el acceso corresponde únicamente a ella. No sugerir que una suscripción incluye todo el catálogo presente o futuro.
+Estos importes son los acordados para la spec 006. La fuente de datos definitiva es la de planes definida allí: no mantener una copia independiente de los precios en esta web.
+Presentación
+- Mostrar las tres modalidades y su importe total por periodo, sin confundir pago semestral o anual con cobros mensuales.
+- Indicar expresamente en todas ellas «Acceso a todas las convocatorias disponibles».
+- Mostrar la renovación automática y enlazar a las condiciones y gestión de suscripción definidas por la spec 006.
+- Si se muestra un equivalente mensual o un ahorro, calcularlo desde los precios vigentes e identificarlo como referencia; no sustituye al importe total cobrado.
+- Las nuevas convocatorias publicadas se incluyen en la suscripción activa sin contratar una suscripción adicional.
+- No ofrecer compras individuales, selección de convocatoria para pagar ni niveles de acceso diferentes por modalidad.
 Selección y destino
-- Desde Tests disponibles se abre Planes con la convocatoria seleccionada, identificada mediante un ID estable en la URL, por ejemplo /planes?convocatoria=<id>.
-- Al acceder directamente a Planes en el MVP se selecciona la única convocatoria publicada.
-- Un identificador inexistente o no comercializado muestra un aviso y permite volver al catálogo.
-- Con futuras convocatorias, la página permitirá elegir una antes de seleccionar el plan.
-- Mientras no exista integración de compra, cada tarjeta muestra «Consultar plan mensual» o «Consultar plan anual» y conduce al formulario de Contacto con convocatoria y modalidad preseleccionadas.
-- El formulario muestra ese contexto y permite al visitante modificarlo. Es información de consulta, no una reserva ni una compra.
-- Cuando la spec de suscripciones aporte el flujo de compra, sustituirá este destino y podrá usar «Suscribirme», conservando convocatoria y modalidad.
-- No crear checkout simulado, suscripciones ficticias ni confirmaciones de pago.
-- Si los precios están pendientes, mostrar «Precio pendiente de publicación». La publicación comercial requiere precios aprobados y coherentes en todas las páginas.
+- Desde Inicio o Tests disponibles se abre /planes, sin ID de convocatoria ni selector de convocatoria.
+- Cada tarjeta permite continuar con la modalidad elegida al flujo de contratación de la spec 006 usando el identificador estable del plan.
+- Reutilizar las rutas y reglas de autenticación de ese flujo; conservar la modalidad durante el inicio de sesión o registro cuando sea necesario.
+- La integración con el pago corresponde a la spec 009. Esta spec no crea un checkout ni modifica sus reglas.
+- Contacto no se utiliza como destino del botón de contratación ni como paso para activar una suscripción.
+- Si la contratación todavía no está disponible, mostrar un estado explícito de disponibilidad pendiente y deshabilitar la acción de contratación. No simular compras ni sustituirlas por consultas al formulario.
+- Para quien ya tiene una suscripción activa, reutilizar el comportamiento definido por la spec 006 para acceder a su gestión; no ofrecer una segunda suscripción simultánea.
+- La selección de modalidad, una redirección o el regreso desde el proveedor de pago no acreditan una suscripción activa. El acceso depende del estado autorizado por las specs 006 y 009.
+- Si falla la carga de planes, mostrar error y opción de reintento. Si no hay modalidades contratables, mostrar un estado de indisponibilidad sin inventar importes ni enlaces.
 Página Contacto
 Campos
 Campo	Obligatorio	Validación propuesta
 Nombre	Sí	Entre 1 y 100 caracteres tras eliminar espacios exteriores
 Correo electrónico	Sí	Formato válido y máximo de 254 caracteres
 Mensaje	Sí	Entre 10 y 5.000 caracteres tras eliminar espacios exteriores
-Convocatoria y modalidad	No	Valores válidos del catálogo comercial, si se incluyen
 
 
-El contexto de una consulta sobre planes se muestra separado del mensaje para que el usuario pueda revisarlo. El formulario está disponible sin autenticación. Incluir información sobre el tratamiento de los datos y un enlace al texto de privacidad disponible antes de publicar.
+El formulario sirve para consultas generales sobre el producto, el acceso y las suscripciones. No contrata ni activa suscripciones. Está disponible sin autenticación. Incluir información sobre el tratamiento de los datos y un enlace al texto de privacidad disponible antes de publicar.
 Comportamiento
 - Validar los campos en el cliente y repetir la validación en el servidor.
 - Mostrar errores junto a cada campo y mantener los valores introducidos.
@@ -121,7 +132,10 @@ Usar una función de servidor, preferentemente una Supabase Edge Function, que v
 Datos y arquitectura
 - Reutilizar React, Tailwind CSS, shadcn/ui, React Hook Form y Zod conforme a las convenciones del proyecto.
 - Reutilizar Supabase y el modelo de convocatorias de la spec 002.
-- Mantener catálogo comercial, modalidades y precios en una fuente compartida para evitar discrepancias entre páginas. Para el MVP puede ser configuración tipada versionada que referencie IDs reales de convocatorias; no se exige crear tablas comerciales en esta spec.
+- Reutilizar las tablas de planes y suscripciones y los contratos definidos por la spec 006. Esta spec no crea tablas comerciales alternativas ni una relación de suscripción por convocatoria.
+- Inicio y Planes consumen la misma fuente de modalidades y precios. Antes de implementar la spec 006, pueden utilizarse datos provisionales centralizados para desarrollo, sin activar contratación; al integrarla deben sustituirse por su fuente definitiva.
+- Separar el catálogo académico de la oferta comercial global: publicar una nueva convocatoria no crea un nuevo plan.
+- Las lecturas públicas de planes solo exponen los campos necesarios de la oferta, nunca datos de suscripciones de otros usuarios.
 - No inferir el acceso a preguntas a partir de la publicación del catálogo.
 - Si se leen datos desde Supabase, ofrecer únicamente los campos públicos necesarios mediante los permisos adecuados; no ampliar el acceso al banco de preguntas.
 - No incorporar otro backend, CMS ni panel de administración para resolver estas páginas.
@@ -135,29 +149,31 @@ Requisitos de experiencia y calidad
 - El formulario y los mensajes no dependen únicamente del color para comunicar su estado.
 Historias de usuario
 1. Como visitante, quiero entender qué ofrece OposNavarra para decidir si me sirve para preparar mi convocatoria.
-2. Como visitante, quiero identificar qué convocatoria está disponible y qué contenido incluye antes de consultar sus planes.
-3. Como visitante, quiero comparar las modalidades mensual y anual y saber exactamente qué acceso corresponde a cada una.
+2. Como visitante, quiero identificar qué convocatoria está disponible y qué contenido incluye y saber que está incluida en la suscripción.
+3. Como visitante, quiero comparar precio y duración de las modalidades mensual, semestral y anual, sabiendo que todas dan acceso al catálogo completo.
 4. Como visitante, quiero enviar una consulta y recibir confirmación de que se ha enviado.
 5. Como usuario registrado, quiero encontrar el acceso a la plataforma desde cualquier página comercial.
 Criterios de aceptación
 - CA-01: las cuatro páginas son públicas y accesibles desde la navegación común, sin exigir registro.
 - CA-02: Inicio explica el producto, la necesidad, las funcionalidades y dirige al catálogo y a los planes.
 - CA-03: Tests disponibles presenta solo el catálogo comercial declarado, inicialmente una convocatoria concreta de Administrativo de Navarra.
-- CA-04: el enlace desde una convocatoria a Planes conserva su ID y la página muestra su denominación.
-- CA-05: Planes diferencia mensual y anual, muestra los precios aprobados cuando existan y aclara que cada modalidad incluye únicamente la convocatoria seleccionada.
-- CA-06: sin compra integrada, los botones de cada modalidad abren Contacto con el contexto visible de la consulta; no se crea una suscripción ni se muestra un pago completado.
+- CA-04: el enlace desde Tests disponibles abre la página general de Planes sin exigir seleccionar una convocatoria.
+- CA-05: Planes muestra mensual (15 €), semestral (79 €) y anual (120 €), con precio total por periodo, renovación automática y el mismo acceso a todas las convocatorias disponibles, conforme a los datos de la spec 006.
+- CA-06: los botones conservan el plan elegido y conducen al flujo de la spec 006 conectado con la pasarela de la spec 009. Si no está disponible, muestran indisponibilidad; nunca derivan a Contacto ni simulan una compra.
 - CA-07: «Acceder» conecta con el flujo de sesión de la spec 003 y no habilita test sin la autorización correspondiente.
 - CA-08: Contacto valida nombre, correo y mensaje en cliente y servidor, con errores vinculados a los campos.
 - CA-09: un envío válido llega al buzón configurado y solo se confirma tras la aceptación del servicio de envío.
 - CA-10: los errores de envío conservan los datos; la carga impide duplicados desde la interfaz y el servidor limita abusos.
-- CA-11: un ID comercial inválido, un catálogo vacío y un fallo de carga tienen respuestas diferenciadas y acciones para continuar.
+- CA-11: catálogo vacío, planes no disponibles y fallo de carga tienen mensajes diferenciados y acciones para continuar.
 - CA-12: navegación, selección de plan y envío del formulario funcionan en móvil y con teclado.
 - CA-13: cada ruta admite apertura directa y recarga, y tiene título, descripción y contenido público indexable.
 - CA-14: no se exponen claves secretas, preguntas privadas, respuestas correctas ni datos de usuarios.
 - CA-15: los textos y llamadas a la acción reflejan el estado real del producto; las funciones pendientes se identifican como tales.
+- CA-16: ninguna página limita la suscripción a una convocatoria ni ofrece su compra individual. Las nuevas convocatorias publicadas quedan incluidas mientras la suscripción esté activa.
+- CA-17: una suscripción activa conduce a la gestión definida por la spec 006; la web comercial no crea una segunda suscripción ni decide el estado de pago.
 Verificación y finalización
 - Ejecutar los controles de tipos, lint y build definidos por el repositorio.
-- Comprobar navegación directa, recargas, contexto de convocatoria y modalidad, y estados de datos inválidos.
+- Comprobar navegación directa, recargas, conservación del plan elegido en el flujo de autenticación y contratación, y estados de carga fallida o indisponibilidad.
 - Verificar el formulario con envío real a un buzón de prueba y casos de validación, fallo del proveedor y limitación de frecuencia.
 - Comprobar mediante una petición directa que el servidor rechaza datos inválidos aunque se omita la validación del navegador.
 - Revisar visualmente las cuatro páginas en móvil y escritorio y recorrer navegación y formulario con teclado.
@@ -166,7 +182,9 @@ Verificación y finalización
 La implementación funcional se considera terminada cuando se cumplen los criterios aplicables y existe envío real. La publicación comercial requiere además cerrar los datos pendientes siguientes.
 Datos pendientes antes de publicar
 - ID y denominación exacta de la convocatoria inicial, y temas que pueden anunciarse como incluidos.
-- Precios mensual y anual, moneda y condiciones comerciales aprobadas.
+- Confirmar que los datos de planes de la spec 006 contienen los precios acordados (15 €, 79 € y 120 €) y sus tres periodos de renovación.
+- Rutas y contratos concretos de contratación, gestión y pago de las specs 006 y 009.
+- Condiciones comerciales y presentación final de los importes conforme a esas specs.
 - Dirección receptora, proveedor de correo y remitente autorizado.
 - Textos legales y de privacidad, y sus rutas.
 - Estado real de disponibilidad de la plataforma y de la contratación.

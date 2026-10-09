@@ -1,10 +1,10 @@
-009 — Panel del administrador
+008 — Panel del administrador
 Objetivo
 Proporcionar a los administradores de OposNavarra un panel integrado en la aplicación para gestionar el catálogo, el banco de preguntas, los usuarios y los planes sin depender del dashboard de Supabase.
 Las suscripciones serán exclusivamente de consulta. La consulta del histórico de tests queda fuera de este MVP.
 1. Dependencias y alcance
 Esta spec se apoya en la 002 (catálogo y banco de preguntas), la 003 (autenticación) y la 006 (planes y suscripciones). Debe reutilizar sus entidades y reglas, sin duplicarlas.
-Antes de implementar, revisar las migraciones y las specs 003 y 006 para confirmar los nombres de las tablas de perfiles, los campos de planes y suscripciones y los estados existentes. Esta spec no presupone un nombre para la tabla de perfiles ni introduce estados de suscripción nuevos.
+La tabla public.perfiles, definida en la 003, contiene el campo rol, con los valores permitidos usuario y admin. Esta spec reutiliza ese modelo. Antes de implementar, revisar las migraciones y las specs 003 y 006 para confirmar el resto de campos de perfiles, planes y suscripciones. No se introducirán estados de suscripción nuevos.
 Incluye frontend, operaciones de backend, autorización y las migraciones necesarias para los permisos administrativos.
 2. Tablas y operaciones
 Tabla o entidad	Operaciones administrativas
@@ -19,19 +19,23 @@ pregunta_tema	Asociar y desvincular.
 planes	Consultar, crear, editar y retirar de la contratación mediante el mecanismo de disponibilidad de la 006. Eliminar solo si no tiene dependencias.
 suscripciones	Consultar exclusivamente.
 Cuentas de Supabase Auth	Consultar, crear, modificar, bloquear, desbloquear y eliminar mediante operaciones administrativas del servidor.
-Perfiles de aplicación, si existen	Consultar y editar los campos definidos en la 003. Creación y eliminación coordinadas con la cuenta.
+public.perfiles	Consultar y editar los campos definidos en la 003. Gestionar rol mediante una operación administrativa específica. Creación y eliminación coordinadas con la cuenta.
 
 
 No se permite editar identificadores, fechas de auditoría ni campos técnicos gestionados automáticamente por el sistema.
 3. Acceso y autorización
 El panel estará disponible en /admin para usuarios autenticados con el correo verificado y rol de administrador. No requiere una suscripción activa.
 Los usuarios ordinarios no podrán acceder al panel ni ejecutar sus operaciones mediante llamadas directas al backend.
-Se utilizará una fuente de roles gestionada por el servidor. Si ya existe, se reutilizará. Si no existe, se añadirá mediante migración una tabla usuario_roles, con usuario_id vinculado a Supabase Auth, rol restringido inicialmente a admin y created_at; la combinación usuario_id + rol será única. La ausencia de ese rol representa a un usuario ordinario.
-Un usuario no puede otorgarse permisos administrativos mediante su perfil, sus metadatos editables ni una petición manipulada. Solo los administradores autorizados podrán gestionar roles.
-El primer administrador se asignará mediante un procedimiento controlado del servidor, documentado y reproducible para una cuenta existente con correo verificado. No existirá un registro público como administrador ni credenciales incorporadas al repositorio.
+public.perfiles.rol será la única fuente de verdad de los permisos. Los únicos valores permitidos serán usuario y admin, conforme a la 003. No se creará usuario_roles ni otro almacenamiento de roles paralelo.
+El servidor identificará al solicitante mediante su sesión validada y consultará su perfil asociado conforme a la relación definida en la 003. Solo rol = admin autoriza operaciones administrativas. Un perfil ausente, un rol inválido o un fallo al comprobarlo no concede acceso.
+Las políticas RLS y cualquier función de autorización utilizarán ese mismo campo. Las funciones auxiliares, si son necesarias para evitar recursión en las políticas de perfiles, consultarán el perfil del usuario autenticado con permisos y alcance mínimos; no aceptarán una identidad arbitraria del cliente para autorizar al solicitante.
+Los valores de rol enviados por el navegador o almacenados en metadatos editables no acreditan permisos. Una copia del rol en una sesión o token no sustituirá la comprobación vigente de perfiles.rol para operaciones administrativas.
+Un usuario ordinario podrá editar únicamente los campos de su perfil permitidos en la 003, sin modificar rol. Se protegerá ese campo también frente a escrituras directas: una política RLS que permita editar el perfil propio no bastará por sí sola para autorizar cambios de rol. Se emplearán permisos de columnas, operaciones controladas o restricciones equivalentes.
+Solo los administradores autorizados podrán cambiar perfiles.rol mediante una operación administrativa específica. La creación normal de cuentas establecerá rol = usuario; una petición de registro o de actualización de perfil no podrá elegir admin.
+El primer administrador se asignará estableciendo perfiles.rol = admin mediante un procedimiento controlado del servidor, documentado y reproducible para una cuenta existente con correo verificado. No existirá un registro público como administrador ni credenciales incorporadas al repositorio.
 Se impedirá eliminar, bloquear o retirar el rol al último administrador habilitado. Esta comprobación debe resistir operaciones concurrentes.
 La protección de rutas del frontend se complementará con autorización en el servidor y políticas RLS para las tablas expuestas. Las credenciales privilegiadas de Supabase permanecerán exclusivamente en el servidor. Cada operación privilegiada comprobará la identidad y los permisos del solicitante antes de ejecutarse.
-El rol de administrador no concederá permisos de escritura sobre suscripciones a través del panel, sus endpoints o las políticas destinadas a la administración. Los procesos autorizados de contratación y pagos conservarán los permisos que requieran las specs 006 y 011.
+El rol de administrador no concederá permisos de escritura sobre suscripciones a través del panel, sus endpoints o las políticas destinadas a la administración. Los procesos autorizados de contratación y pagos conservarán los permisos que requieran la spec 006 y la spec de pasarela de pago.
 4. Navegación y comportamiento común
 El panel tendrá seis apartados: Convocatorias, Temas, Exámenes, Preguntas, Usuarios y Planes y suscripciones.
 No será necesario crear pantallas independientes para las tablas de relaciones ni para las respuestas: se gestionarán desde las entidades correspondientes.
@@ -65,7 +69,7 @@ Los administradores podrán:
 - Modificar los campos de perfil existentes y solicitar un cambio de correo a través del flujo de verificación de Supabase Auth.
 - Iniciar el flujo de recuperación de contraseña sin conocer la contraseña del usuario.
 - Bloquear y desbloquear el acceso sin modificar su suscripción.
-- Asignar o retirar el rol de administrador, respetando la protección del último administrador.
+- Cambiar perfiles.rol entre usuario y admin mediante la operación específica de gestión de roles, respetando la protección del último administrador.
 - Eliminar una cuenta cuando sus dependencias permitan hacerlo.
 La creación de cuenta y perfil se coordinará para evitar cuentas o perfiles huérfanos. Los fallos parciales tendrán una estrategia de recuperación o compensación explícita.
 El bloqueo debe impedir el acceso protegido también con sesiones emitidas anteriormente; el backend comprobará el estado de acceso cuando corresponda. Retirar el rol debe impedir nuevas operaciones administrativas aunque exista una sesión previa.
@@ -74,7 +78,7 @@ La eliminación de un usuario con suscripciones asociadas se rechazará en este 
 El panel permitirá consultar, crear y editar planes utilizando los campos y reglas de la 006. Los planes existentes son mensual de 15 €, semestral de 79 € y anual de 120 €, con renovación al finalizar cada periodo según la 006.
 Los cambios de precio o duración no modificarán retroactivamente periodos, importes ni condiciones ya contratadas. La implementación reutilizará el mecanismo de conservación de condiciones de la 006 y deberá verificarlo antes de habilitar estas ediciones. Si no existe, se añadirá mediante migración el mecanismo necesario, sin permitir ediciones manuales de suscripciones desde el panel.
 Un plan con suscripciones asociadas no podrá eliminarse. Para retirarlo de futuras contrataciones se utilizará su mecanismo de disponibilidad, manteniendo las suscripciones existentes.
-Esta spec no incluye crear precios o productos en Stripe, cambiar cobros ni sincronizar el catálogo con el proveedor. La 011 deberá integrar ese comportamiento antes de utilizar cambios administrativos de planes en cobros reales.
+Esta spec no incluye crear precios o productos en Stripe, cambiar cobros ni sincronizar el catálogo con el proveedor. La spec de pasarela de pago deberá integrar ese comportamiento antes de utilizar cambios administrativos de planes en cobros reales.
 10. Suscripciones: solo consulta
 El administrador podrá consultar un listado paginado, buscar por usuario, filtrar por plan y estado y abrir el detalle de cada suscripción.
 Se mostrarán el usuario, el plan, el estado y las fechas y datos de renovación que existan en la 006. No se inventarán campos ni estados adicionales para esta pantalla.
@@ -85,8 +89,8 @@ Las convocatorias, temas y exámenes con dependencias no podrán eliminarse. Las
 Eliminar una pregunta podrá eliminar sus propias respuestas y filas de pregunta_tema dentro de la misma operación, pero no sus temas ni su examen. Cualquier otra dependencia impedirá la eliminación. La interfaz recomendará desactivarla cuando se quiera retirarla del uso sin borrarla.
 Las restricciones se garantizarán mediante claves foráneas y reglas del servidor. Si las migraciones existentes permiten cascadas incompatibles con esta spec, se ajustarán mediante una migración nueva.
 12. Migraciones y verificación
-Se reutilizarán las tablas de dominio existentes. Los cambios de roles, políticas, restricciones o funciones se introducirán mediante nuevas migraciones versionadas. No se modificarán migraciones ya aplicadas ni se dependerá de cambios manuales en el dashboard.
-La implementación incluirá pruebas de autorización, integridad editorial, guardado atómico, eliminaciones con dependencias, protección del último administrador y restricciones de escritura sobre suscripciones. Se verificará el flujo completo de una pregunta y las operaciones de usuario relevantes en un entorno de pruebas.
+Se reutilizarán las tablas de dominio existentes y public.perfiles de la 003. No se creará una tabla adicional de roles. Se conservará la restricción de perfiles.rol a usuario y admin. Los cambios necesarios de políticas, permisos, restricciones o funciones se introducirán mediante nuevas migraciones versionadas. No se modificarán migraciones ya aplicadas ni se dependerá de cambios manuales en el dashboard.
+La implementación incluirá pruebas que acrediten que servidor y RLS utilizan perfiles.rol, que un usuario no puede modificar su propio rol mediante escrituras directas ni suplantarlo con metadatos o peticiones manipuladas, y que un perfil ausente no concede acceso. También incluirá pruebas de autorización, integridad editorial, guardado atómico, eliminaciones con dependencias, protección del último administrador y restricciones de escritura sobre suscripciones. Se verificará el flujo completo de una pregunta y las operaciones de usuario relevantes en un entorno de pruebas.
 Las operaciones de cuentas que envíen invitaciones o recuperación de contraseña se probarán con un mecanismo de pruebas que evite envíos accidentales a usuarios reales.
 13. Fuera de alcance
 - Consulta o gestión del histórico de tests, resultados y respuestas de usuarios.
@@ -101,21 +105,22 @@ Se conservarán las fechas created_at y updated_at previstas en las specs existe
 14. Criterios de aceptación
 1. Un administrador autenticado y con correo verificado puede acceder a /admin sin necesitar una suscripción.
 2. Un usuario ordinario o no autenticado no puede acceder a datos ni operaciones administrativas mediante rutas o peticiones directas.
-3. Los roles no pueden modificarse mediante datos editables por el usuario y las credenciales privilegiadas no llegan al navegador.
-4. Existe un procedimiento documentado para asignar el primer administrador y no se puede dejar el sistema sin administradores habilitados.
-5. Se pueden crear, editar, activar y desactivar convocatorias y temas, y gestionar exámenes.
-6. Se pueden gestionar las asociaciones sin duplicar entidades ni asociaciones.
-7. numero y orden de los temas se validan por separado y pueden reorganizarse sin guardados parciales.
-8. Se pueden buscar y filtrar preguntas, incluyendo las preguntas no publicadas.
-9. Una pregunta en revisión puede guardarse incompleta; una pregunta publicada siempre cumple las reglas de respuestas de la 002.
-10. El guardado de preguntas, respuestas y asociaciones es atómico.
-11. La disponibilidad por convocatoria se deriva de temas y exámenes sin duplicados ni una relación directa nueva.
-12. Se pueden crear y editar cuentas y perfiles, iniciar recuperación de contraseña, bloquear, desbloquear y gestionar roles según las reglas de esta spec.
-13. El bloqueo y la retirada de permisos se aplican también a usuarios con sesiones previas.
-14. No se eliminan cuentas con suscripciones asociadas ni se modifica su suscripción al bloquearlas.
-15. Los planes se pueden gestionar sin alterar las condiciones de suscripciones existentes ni eliminar planes referenciados.
-16. Las suscripciones pueden consultarse, buscarse y filtrarse, pero las operaciones administrativas de escritura son rechazadas por el backend.
-17. Las eliminaciones respetan las dependencias y nunca borran contenido reutilizable de forma implícita.
-18. Los listados tienen paginación y los formularios presentan estados y errores comprensibles.
-19. El panel no incluye histórico de tests ni estadísticas.
-20. Las migraciones y las pruebas críticas pasan, junto con las comprobaciones de compilación, tipos y lint exigidas por el proyecto.
+3. public.perfiles.rol es la única fuente de verdad, admite únicamente usuario y admin, y no se crea usuario_roles ni otro modelo paralelo.
+4. Servidor y políticas RLS comprueban ese campo; los usuarios ordinarios no pueden cambiarlo mediante edición de su perfil, peticiones directas ni metadatos manipulados. Las credenciales privilegiadas no llegan al navegador.
+5. Existe un procedimiento documentado para asignar el primer administrador y no se puede dejar el sistema sin administradores habilitados.
+6. Se pueden crear, editar, activar y desactivar convocatorias y temas, y gestionar exámenes.
+7. Se pueden gestionar las asociaciones sin duplicar entidades ni asociaciones.
+8. numero y orden de los temas se validan por separado y pueden reorganizarse sin guardados parciales.
+9. Se pueden buscar y filtrar preguntas, incluyendo las preguntas no publicadas.
+10. Una pregunta en revisión puede guardarse incompleta; una pregunta publicada siempre cumple las reglas de respuestas de la 002.
+11. El guardado de preguntas, respuestas y asociaciones es atómico.
+12. La disponibilidad por convocatoria se deriva de temas y exámenes sin duplicados ni una relación directa nueva.
+13. Se pueden crear y editar cuentas y perfiles, iniciar recuperación de contraseña, bloquear, desbloquear y gestionar roles según las reglas de esta spec.
+14. El bloqueo y la retirada de permisos se aplican también a usuarios con sesiones previas.
+15. No se eliminan cuentas con suscripciones asociadas ni se modifica su suscripción al bloquearlas.
+16. Los planes se pueden gestionar sin alterar las condiciones de suscripciones existentes ni eliminar planes referenciados.
+17. Las suscripciones pueden consultarse, buscarse y filtrarse, pero las operaciones administrativas de escritura son rechazadas por el backend.
+18. Las eliminaciones respetan las dependencias y nunca borran contenido reutilizable de forma implícita.
+19. Los listados tienen paginación y los formularios presentan estados y errores comprensibles.
+20. El panel no incluye histórico de tests ni estadísticas.
+21. Las migraciones y las pruebas críticas pasan, junto con las comprobaciones de compilación, tipos y lint exigidas por el proyecto.
