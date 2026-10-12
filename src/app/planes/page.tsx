@@ -1,13 +1,16 @@
 import Link from 'next/link';
 
-import { formatPrice, subscriptionPlans } from '@/lib/public-content';
+import { formatPrice } from '@/lib/public-content';
+import { getPublicPlans } from '@/lib/subscriptions';
 
 export const metadata = {
   title: 'Planes',
   description: 'Consulta las modalidades de suscripción de OposNavarra y el acceso global a todas las convocatorias disponibles.',
 };
 
-export default function PlansPage() {
+export default async function PlansPage() {
+  const plans = await getPublicPlans();
+
   return (
     <main className="page-shell py-10 md:py-14">
       <section className="max-w-3xl">
@@ -22,7 +25,7 @@ export default function PlansPage() {
       </section>
 
       <section className="mt-10 grid gap-6 lg:grid-cols-3">
-        {subscriptionPlans.map((plan) => (
+        {plans.map((plan) => (
           <article key={plan.code} className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_16px_42px_rgba(23,60,58,0.04)]">
             <div className="flex items-center justify-between gap-4">
               <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
@@ -51,11 +54,11 @@ export default function PlansPage() {
               </li>
               <li className="flex gap-3">
                 <span aria-hidden="true">•</span>
-                <span>Renovación automática: {plan.renewal.toLowerCase()}.</span>
+                <span>Renovación automática cada {plan.durationMonths === 1 ? 'mes' : plan.durationMonths === 6 ? '6 meses' : 'año'}.</span>
               </li>
               <li className="flex gap-3">
                 <span aria-hidden="true">•</span>
-                <span>La misma experiencia de estudio en cada modalidad.</span>
+                <span>Las nuevas convocatorias se incorporan mientras la suscripción siga vigente.</span>
               </li>
             </ul>
 
@@ -65,7 +68,7 @@ export default function PlansPage() {
               aria-disabled="true"
               className="mt-7 inline-flex w-full items-center justify-center rounded-full border border-[var(--line)] bg-[rgba(23,60,58,0.02)] px-4 py-3 font-sans text-sm font-semibold text-[var(--muted)] cursor-not-allowed"
             >
-              Contratación pendiente
+              Pago no disponible
             </button>
           </article>
         ))}
