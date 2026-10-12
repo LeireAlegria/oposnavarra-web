@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 
+import { SiteFooter } from '@/components/site-footer';
+import { SiteHeader } from '@/components/site-header';
 import { createClient } from '@/lib/supabase/server';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: { default: 'OposNavarra | Tests para oposiciones', template: '%s | OposNavarra' },
-  description: 'Plataforma para practicar tests de oposiciones de Navarra.',
+  description: 'Plataforma para preparar oposiciones de Navarra con tests, seguimiento y suscripción global.',
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -18,20 +19,12 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
 
   return (
     <html lang="es">
-      <body>
-        <header className="site-header">
-          <Link className="brand" href="/" aria-label="OposNavarra, inicio">
-            <span className="brand-mark">ON</span>
-            <span>
-              opos<span className="brand-accent">navarra</span>
-            </span>
-          </Link>
-          <nav aria-label="Navegación principal">
-            {isAuthenticated ? <Link href="/plataforma">Plataforma</Link> : <Link href="/acceder">Acceder</Link>}
-          </nav>
-        </header>
-        {children}
-        <footer className="site-footer">OposNavarra · Preparar con sentido</footer>
+      <body className="min-h-screen bg-[var(--cream)] text-[var(--ink)] antialiased">
+        <div className="flex min-h-screen flex-col">
+          <SiteHeader isAuthenticated={isAuthenticated} />
+          <div className="flex-1">{children}</div>
+          <SiteFooter />
+        </div>
       </body>
     </html>
   );
