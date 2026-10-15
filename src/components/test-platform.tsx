@@ -27,6 +27,12 @@ function formatSeconds(seconds: number) {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+function formatClock(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('es-ES', {
     dateStyle: 'medium',
@@ -44,6 +50,8 @@ export function TestPlatform() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [isReady, setIsReady] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isFinishConfirmationOpen, setIsFinishConfirmationOpen] = useState(false);
 
   const availableQuestions = useMemo(() => getExamAvailableQuestionCount(topicIds), [topicIds]);
 
@@ -78,18 +86,19 @@ export function TestPlatform() {
   }, [attempts, isReady]);
 
   useEffect(() => {
-    if (!activeAttempt || activeAttempt.status !== 'in_progress' || activeAttempt.timeLimitSeconds <= 0) {
+    if (!activeAttempt || activeAttempt.status !== 'in_progress') {
       return;
     }
 
-    const timer = window.setInterval(() => {
-      if (!activeAttempt.expiresAt) {
-        return;
-      }
+    const updateClock = () => {
+      const now = Date.now();
+      setElapsedSeconds(Math.max(0, Math.floor((now - new Date(activeAttempt.startedAt).getTime()) / 1000)));
 
-      const remaining = Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt).getTime() - Date.now()) / 1000));
-
-      if (remaining <= 0) {
+      if (
+        activeAttempt.timeLimitSeconds > 0 &&
+        activeAttempt.expiresAt &&
+        new Date(activeAttempt.expiresAt).getTime() <= now
+      ) {
         const finalAttempt = finalizeAttempt({
           ...activeAttempt,
           questions: activeAttempt.questions.map((question) => ({
@@ -102,17 +111,11 @@ export function TestPlatform() {
         setAttempts((current) => current.map((entry) => (entry.id === finalAttempt.id ? finalAttempt : entry)));
         setActiveAttempt(finalAttempt);
         setActiveTab('resultados');
-        return;
       }
+    };
 
-      setActiveAttempt((current) => {
-        if (!current) {
-          return current;
-        }
-
-        return { ...current, expiresAt: current.expiresAt };
-      });
-    }, 1000);
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
 
     return () => window.clearInterval(timer);
   }, [activeAttempt]);
@@ -186,14 +189,19 @@ export function TestPlatform() {
 
     setAttempts((current) => current.map((entry) => (entry.id === finished.id ? finished : entry)));
     setActiveAttempt(finished);
+    setIsFinishConfirmationOpen(false);
     setActiveTab('resultados');
   };
 
   const currentQuestion = activeAttempt?.questions[currentQuestionIndex] ?? null;
   const completedAttempts = attempts.filter((attempt) => attempt.status === 'finalizado');
+  const answeredCount = activeAttempt?.questions.filter((question) => question.selectedAnswerId).length ?? 0;
+  const unansweredCount = (activeAttempt?.questions.length ?? 0) - answeredCount;
+  const isPracticeInProgress = activeTab === 'curso' && activeAttempt?.status === 'in_progress';
 
   return (
-    <main className="page-shell py-10 md:py-14">
+    <main className={isPracticeInProgress ? 'min-h-[70vh] overflow-hidden rounded-[1.5rem] border border-[var(--line)] bg-[#f8f7f3]' : 'page-shell py-10 md:py-14'}>
+      {!isPracticeInProgress ? (
       <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="eyebrow">Plataforma</p>
@@ -201,6 +209,7 @@ export function TestPlatform() {
             Tu preparación
           </h1>
         </div>
+        ) : null}
         <div className="inline-flex rounded-full border border-[var(--line)] bg-white/70 p-1">
           {[
             { key: 'crear', label: 'Crear test' },
@@ -322,7 +331,7 @@ export function TestPlatform() {
       ) : null}
 
       {activeTab === 'curso' ? (
-        <section className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_26px_70px_rgba(23,60,58,0.04)] md:p-8">
+        <section className={activeAttempt ? 'grid lg:min-h-[760px] lg:grid-cols-[230px_minmax(0,1fr)]' : 'rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_26px_70px_rgba(23,60,58,0.04)] md:p-8'}>
           {!activeAttempt ? (
             <div>
               <p className="eyebrow">Sin test en curso</p>
@@ -337,75 +346,247 @@ export function TestPlatform() {
             </div>
           ) : (
             <>
-              <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="eyebrow">Pregunta {currentQuestionIndex + 1} / {activeAttempt.questions.length}</p>
-                  <h2 className="text-2xl font-normal text-[var(--ink)]">{demoExam.name}</h2>
+              <aside className="flex flex-col border-b border-[var(--line)] bg-[#f6f5f0] p-5 lg:border-b-0 lg:border-r lg:p-6">
+                <div className="rounded-xl bg-[#eeede6] p-4">
+                  <p className="font-sans text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">Mi oposición</p>
+                  <p className="mt-2 font-sans text-sm font-semibold text-[var(--ink)]">{demoExam.name}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">Gobierno de Navarra</p>
                 </div>
-                {activeAttempt.timeLimitSeconds > 0 ? (
-                  <div className="rounded-full bg-[rgba(243,111,94,0.08)] px-4 py-2 font-sans text-sm font-semibold text-[var(--coral)]">
-                    {(() => {
-                      const remaining = Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt ?? Date.now()).getTime() - Date.now()) / 1000));
-                      return `Quedan ${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}`;
-                    })()}
-                  </div>
-                ) : null}
-              </div>
-
-              {currentQuestion ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-5 md:p-6">
-                    <p className="text-lg font-semibold text-[var(--ink)]">{currentQuestion.text}</p>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {currentQuestion.options.map((option) => {
-                      const selected = currentQuestion.selectedAnswerId === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => handleAnswerSelection(option.id)}
-                          className={[
-                            'rounded-2xl border px-4 py-3 text-left font-sans text-sm transition-colors',
-                            selected
-                              ? 'border-[var(--coral)] bg-[rgba(243,111,94,0.08)] text-[var(--ink)]'
-                              : 'border-[var(--line)] bg-white text-[var(--ink)] hover:border-[var(--coral)]',
-                          ].join(' ')}
-                        >
-                          {option.text}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+                <nav aria-label="Navegación de la plataforma" className="mt-5 grid gap-1">
+                  {[
+                    { key: 'crear' as const, label: 'Crear test', icon: '＋' },
+                    { key: 'curso' as const, label: 'Mi test', icon: '☷' },
+                    { key: 'resultados' as const, label: 'Mis resultados', icon: '▥' },
+                  ].map((item) => (
                     <button
+                      key={item.key}
                       type="button"
-                      onClick={() => setCurrentQuestionIndex((index) => Math.max(0, index - 1))}
-                      disabled={currentQuestionIndex === 0}
-                      className="rounded-full border border-[var(--line)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setActiveTab(item.key)}
+                      className={[
+                        'flex min-h-11 items-center gap-3 rounded-lg px-3 text-left font-sans text-sm transition-colors',
+                        item.key === 'curso' ? 'bg-[#fbefec] font-semibold text-[#bd3734]' : 'text-[var(--muted)] hover:bg-white',
+                      ].join(' ')}
                     >
-                      Anterior
+                      <span aria-hidden="true" className="text-lg leading-none">{item.icon}</span>
+                      {item.label}
                     </button>
+                  ))}
+                </nav>
+                <div className="mt-auto hidden pt-8 text-xs leading-5 text-[var(--muted)] lg:block">
+                  <p className="font-medium text-[var(--ink)]">Un test. Un paso más.</p>
+                  <p className="mt-2">Avanza pregunta a pregunta y revisa tu progreso cuando lo necesites.</p>
+                </div>
+              </aside>
 
-                    <div className="flex gap-3">
+              <div className="min-w-0 p-4 sm:p-6 lg:p-8">
+                <div className="mb-6">
+                  <p className="text-xs text-[var(--muted)]">Mis test <span className="mx-2">/</span> {demoExam.name} <span className="mx-2">/</span> Test por tema</p>
+                  <p className="eyebrow mt-6">Tu momento de práctica</p>
+                  <h2 className="font-serif text-3xl font-normal tracking-[-0.04em] text-[#302f2b] sm:text-4xl">{demoExam.name}</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    {activeAttempt.questions.length} preguntas · Una única respuesta correcta
+                  </p>
+                </div>
+
+                <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
+                  <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
+                    <div className="p-5 sm:p-7">
+                      {currentQuestion ? (
+                        <div className="space-y-6">
+                          <p className="font-sans text-sm font-bold text-[#bd3734]">
+                            PREGUNTA {String(currentQuestionIndex + 1).padStart(2, '0')} <span className="ml-2 font-normal text-[var(--muted)]">/ {activeAttempt.questions.length}</span>
+                          </p>
+
+                          <div>
+                            <p className="text-sm text-[var(--muted)]">
+                              {demoExam.topics.find((topic) => topic.id === currentQuestion.topicId)?.name ?? 'Pregunta'}
+                            </p>
+                            <h3 className="mt-3 text-xl font-semibold leading-relaxed text-[#302f2b] sm:text-2xl">{currentQuestion.text}</h3>
+                          </div>
+
+                          <fieldset className="grid gap-3">
+                            <legend className="sr-only">Selecciona una respuesta</legend>
+                            {currentQuestion.options.map((option, optionIndex) => {
+                              const selected = currentQuestion.selectedAnswerId === option.id;
+                              return (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  aria-pressed={selected}
+                                  onClick={() => handleAnswerSelection(option.id)}
+                                  className={[
+                                    'flex min-h-[68px] items-center gap-4 rounded-lg border px-4 py-3 text-left transition-colors sm:px-5',
+                                    selected
+                                      ? 'border-2 border-[#c43b38] bg-[#fbefec] text-[#302f2b]'
+                                      : 'border-[var(--line)] bg-white text-[#302f2b] hover:border-[#c43b38]',
+                                  ].join(' ')}
+                                >
+                                  <span className={[
+                                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-sans text-sm font-semibold',
+                                    selected ? 'bg-[#bd3734] text-white' : 'bg-[#f6f5f0] text-[var(--muted)]',
+                                  ].join(' ')}>
+                                    {String.fromCharCode(65 + optionIndex)}
+                                  </span>
+                                  <span className="flex-1 text-sm leading-6 sm:text-base">{option.text}</span>
+                                  <span aria-hidden="true" className={[
+                                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
+                                    selected ? 'border-[#bd3734]' : 'border-[#deded7]',
+                                  ].join(' ')}>
+                                    {selected ? <span className="h-2.5 w-2.5 rounded-full bg-[#bd3734]" /> : null}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </fieldset>
+
+                          <p className="text-sm text-[var(--muted)]" aria-live="polite">
+                            {currentQuestion.selectedAnswerId ? '✓ Respuesta guardada en este dispositivo' : 'Selecciona una respuesta o déjala en blanco.'}
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="border-t border-[var(--line)] p-5 sm:px-7 sm:py-6">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentQuestionIndex((index) => Math.max(0, index - 1))}
+                          disabled={currentQuestionIndex === 0}
+                          className="min-h-12 rounded-lg border border-[var(--line)] px-5 font-sans text-sm font-semibold text-[#302f2b] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          ← Anterior
+                        </button>
+                        {currentQuestionIndex < activeAttempt.questions.length - 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentQuestionIndex((index) => Math.min(activeAttempt.questions.length - 1, index + 1))}
+                            className="min-h-12 rounded-lg bg-[#bd3734] px-5 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                          >
+                            Siguiente pregunta →
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setIsFinishConfirmationOpen(true)}
+                            className="min-h-12 rounded-lg bg-[#bd3734] px-5 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                          >
+                            Finalizar test
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-5 text-xs text-[var(--muted)]">Verás tus resultados al finalizar el test.</p>
+                    </div>
+                  </div>
+
+                  <aside className="grid gap-4">
+                    <section className="rounded-2xl bg-[#eeede6] p-5" aria-label="Tiempo de sesión">
+                      <p className="text-sm text-[var(--muted)]">◷ <span className="ml-2">Tiempo de sesión</span></p>
+                      <div className="mt-4 flex items-end justify-between gap-2">
+                        <p className="font-serif text-3xl text-[#302f2b]">
+                          {activeAttempt.timeLimitSeconds > 0 && activeAttempt.expiresAt
+                            ? formatClock(Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt).getTime() - Date.now()) / 1000)))
+                            : formatClock(elapsedSeconds)}
+                        </p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {activeAttempt.timeLimitSeconds > 0 ? 'Tiempo restante' : 'Sin límite de tiempo'}
+                        </p>
+                      </div>
+                    </section>
+
+                    <section className="rounded-2xl border border-[var(--line)] bg-white p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="font-sans text-sm font-semibold text-[#302f2b]">Tu progreso</h3>
+                        <span className="text-sm font-semibold text-[#bd3734]">
+                          {Math.round((answeredCount / activeAttempt.questions.length) * 100)} %
+                        </span>
+                      </div>
+                      <div
+                        className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#eeede6]"
+                        role="progressbar"
+                        aria-label="Progreso del test"
+                        aria-valuemin={0}
+                        aria-valuemax={activeAttempt.questions.length}
+                        aria-valuenow={answeredCount}
+                      >
+                        <div className="h-full rounded-full bg-[#bd3734]" style={{ width: `${(answeredCount / activeAttempt.questions.length) * 100}%` }} />
+                      </div>
+                      <p className="mt-3 text-xs text-[var(--muted)]">
+                        {answeredCount} de {activeAttempt.questions.length} respondidas · {unansweredCount} pendientes
+                      </p>
+
+                      <div className="my-5 border-t border-[var(--line)]" />
+                      <p className="mb-3 text-sm font-medium text-[#302f2b]">Ir a la pregunta</p>
+                      <div className="grid grid-cols-5 gap-2">
+                        {activeAttempt.questions.map((question, index) => {
+                          const isCurrent = index === currentQuestionIndex;
+                          const hasAnswer = Boolean(question.selectedAnswerId);
+                          return (
+                            <button
+                              key={question.id}
+                              type="button"
+                              onClick={() => setCurrentQuestionIndex(index)}
+                              aria-current={isCurrent ? 'step' : undefined}
+                              aria-label={`Ir a la pregunta ${index + 1}, ${hasAnswer ? 'respondida' : 'pendiente'}${isCurrent ? ', actual' : ''}`}
+                              className={[
+                                'relative aspect-square rounded-md border font-sans text-sm font-medium transition-colors',
+                                isCurrent
+                                  ? 'border-[#bd3734] bg-[#bd3734] text-white'
+                                  : hasAnswer
+                                    ? 'border-transparent bg-[#eeede6] text-[#302f2b] hover:border-[#bd3734]'
+                                    : 'border-[var(--line)] bg-white text-[var(--muted)] hover:border-[#bd3734]',
+                              ].join(' ')}
+                            >
+                              {String(index + 1).padStart(2, '0')}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="my-5 border-t border-[var(--line)]" />
                       <button
                         type="button"
-                        onClick={() => setCurrentQuestionIndex((index) => Math.min(activeAttempt.questions.length - 1, index + 1))}
-                        className="rounded-full border border-[var(--ink)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)]"
+                        onClick={() => setIsFinishConfirmationOpen(true)}
+                        className="min-h-12 w-full rounded-lg border border-[var(--line)] px-4 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
                       >
-                        Siguiente
+                        Finalizar y ver resultados
+                      </button>
+                      <p className="mt-3 text-center text-xs leading-5 text-[var(--muted)]">
+                        {unansweredCount > 0 ? `Tienes ${unansweredCount} preguntas sin responder.` : 'Has respondido todas las preguntas.'}
+                      </p>
+                    </section>
+                  </aside>
+                </div>
+              </div>
+              {isFinishConfirmationOpen ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                  <section
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="finish-test-title"
+                    className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+                  >
+                    <h2 id="finish-test-title" className="text-xl font-semibold text-[#302f2b]">¿Finalizar el test?</h2>
+                    <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+                      {unansweredCount > 0
+                        ? `Tienes ${unansweredCount} ${unansweredCount === 1 ? 'pregunta sin responder' : 'preguntas sin responder'}. ¿Quieres entregar el test ahora?`
+                        : 'Has respondido todas las preguntas. ¿Quieres entregar el test ahora?'}
+                    </p>
+                    <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setIsFinishConfirmationOpen(false)}
+                        className="min-h-11 rounded-lg border border-[var(--line)] px-4 font-sans text-sm font-semibold text-[#302f2b]"
+                      >
+                        Seguir practicando
                       </button>
                       <button
                         type="button"
                         onClick={handleFinalizeAttempt}
-                        className="rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+                        className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white"
                       >
-                        Finalizar test
+                        Confirmar y finalizar
                       </button>
                     </div>
-                  </div>
+                  </section>
                 </div>
               ) : null}
             </>

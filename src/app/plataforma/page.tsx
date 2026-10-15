@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 
 import { TestPlatform } from '@/components/test-platform';
 import { createClient } from '@/lib/supabase/server';
+import { AbandonPendingSubscriptionButton } from '@/components/abandon-pending-subscription-button';
+import { StripePortalButton } from '@/components/stripe-portal-button';
 
 import { LogoutButton } from './logout-button';
 
@@ -35,10 +37,65 @@ export default async function PlatformPage() {
   const { data: hasAccess, error: accessError } = await supabase.rpc('comprobar_acceso_suscripcion', {
     p_usuario_id: user.id,
   });
+  const subscriptionRecord = subscription as
+    | (Record<string, unknown> & {
+        id: string;
+        plan_id: string;
+        estado: string;
+        periodo_inicio: string | null;
+        periodo_fin: string | null;
+        cancelar_al_final_del_periodo: boolean;
+        stripe_customer_id: string | null;
+        stripe_subscription_id: string | null;
+        stripe_status: string | null;
+        payment_issue: string | null;
+        access_revoked_at: string | null;
+      })
+    | null;
+  const { data: plan } = subscriptionRecord
+    ? await supabase.from('planes').select('nombre').eq('id', subscriptionRecord.plan_id).maybeSingle()
+    : { data: null };
+  const { data: checkoutAttempts } = subscriptionRecord?.estado === 'pendiente'
+    ? await supabase
+        .from('stripe_checkout_attempts')
+        .select('estado, expires_at')
+        .eq('suscripcion_id', subscriptionRecord.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+    : { data: null };
 
-  const statusText = subscriptionError || accessError ? 'No se pudo cargar tu suscripción.' : subscription?.estado ?? 'sin suscripción';
+  const statusText = subscriptionError || accessError ? 'No se pudo cargar tu suscripción.' : subscriptionRecord?.estado ?? 'sin suscripción';
 
   const hasActiveAccess = Boolean(hasAccess);
+  const canAbandonPending =
+    subscriptionRecord?.estado === 'pendiente' &&
+    !subscriptionRecord.stripe_subscription_id &&
+    (!checkoutAttempts?.[0] ||
+      checkoutAttempts[0].estado === 'expired' ||
+      (checkoutAttempts[0].expires_at && new Date(checkoutAttempts[0].expires_at).getTime() <= Date.now()));
+  const paymentIssueMessage =
+    subscriptionRecord?.payment_issue === 'action_required'
+      ? 'Tu pago requiere una acción. Abre el portal para completar la autenticación del pago.'
+      : subscriptionRecord?.payment_issue === 'payment_failed'
+        ? 'No se pudo completar el último cobro. Actualiza el método de pago en el portal.'
+        : null;
+  const friendlyStatus =
+    subscriptionRecord?.estado === 'activa' &&
+    subscriptionRecord.access_revoked_at &&
+    subscriptionRecord.periodo_fin &&
+    new Date(subscriptionRecord.periodo_fin).getTime() > Date.now()
+      ? 'Acceso suspendido tras un reembolso'
+      : subscriptionRecord?.estado === 'activa' && !hasActiveAccess
+      ? 'Periodo pagado finalizado'
+      : subscriptionRecord?.estado === 'activa' && subscriptionRecord.cancelar_al_final_del_periodo
+        ? 'Activa · no se renovará'
+        : subscriptionRecord?.estado === 'activa'
+          ? 'Activa'
+          : subscriptionRecord?.estado === 'pendiente'
+            ? 'Pago pendiente'
+            : subscriptionRecord?.estado === 'vencida' || subscriptionRecord?.estado === 'cancelada'
+              ? 'Finalizada'
+              : 'Sin suscripción';
 
   return (
     <main className="page-shell py-10 md:py-14">
@@ -48,7 +105,7 @@ export default async function PlatformPage() {
           Tu espacio de práctica
         </h1>
         <p className="mt-5 max-w-2xl text-lg text-[var(--muted)]">
-          La aplicación de tests sigue en desarrollo, pero la gestión de la suscripción ya se encuentra preparada para la integración con la plataforma.
+          Gestiona tu acceso, los pagos y la preparación desde tu cuenta.
         </p>
 
         <div className="mt-8 grid gap-6 md:grid-cols-2">
@@ -65,11 +122,28 @@ export default async function PlatformPage() {
           <div className="rounded-2xl border border-[var(--line)] bg-[rgba(243,111,94,0.05)] p-5">
             <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">Suscripción</p>
             <p className="mt-3 text-2xl font-semibold text-[var(--ink)]">
-              {subscription ? subscription.estado : 'Sin suscripción'}
+              {friendlyStatus}
             </p>
             <p className="mt-3 text-sm text-[var(--muted)]">
-              {subscription?.periodo_fin ? `Periodo actual hasta ${formatDate(subscription.periodo_fin)}` : 'La contratación pendiente o sin fecha no concede acceso.'}
+              {plan?.nombre ? `Plan ${plan.nombre}. ` : ''}
+              {subscriptionRecord?.periodo_fin
+                ? `Acceso pagado hasta ${formatDate(subscriptionRecord.periodo_fin)}.`
+                : 'La contratación pendiente no concede acceso.'}
             </p>
+            {subscriptionRecord?.estado === 'activa' &&
+            !subscriptionRecord.cancelar_al_final_del_periodo &&
+            subscriptionRecord.stripe_status === 'active' &&
+            !subscriptionRecord.payment_issue ? (
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                Próxima renovación prevista para {formatDate(subscriptionRecord.periodo_fin!)}; no es un cobro confirmado.
+              </p>
+            ) : null}
+            {subscriptionRecord?.cancelar_al_final_del_periodo ? (
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                Tu suscripción no se renovará. Mantienes el acceso hasta el final del periodo pagado.
+              </p>
+            ) : null}
+            {paymentIssueMessage ? <p role="alert" className="mt-3 text-sm text-[var(--coral)]">{paymentIssueMessage}</p> : null}
           </div>
         </div>
 
@@ -82,6 +156,21 @@ export default async function PlatformPage() {
           </Link>
           <LogoutButton />
         </div>
+
+        {subscriptionRecord?.stripe_subscription_id ? (
+          <div className="mt-6">
+            <StripePortalButton />
+          </div>
+        ) : null}
+        {canAbandonPending ? (
+          <div className="mt-6">
+            <AbandonPendingSubscriptionButton />
+          </div>
+        ) : subscriptionRecord?.estado === 'pendiente' && !subscriptionRecord.stripe_subscription_id ? (
+          <p className="mt-6 text-sm text-[var(--muted)]">
+            Hay una sesión de pago que todavía puede completarse. Espera a que Stripe la marque como caducada antes de elegir otro plan.
+          </p>
+        ) : null}
 
         <p className="mt-6 text-sm text-[var(--muted)]">{statusText}</p>
       </div>

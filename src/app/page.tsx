@@ -4,7 +4,12 @@ import { featuredExamination, formatPrice } from '@/lib/public-content';
 import { getPublicPlans } from '@/lib/subscriptions';
 
 export default async function HomePage() {
-  const plans = await getPublicPlans();
+  let plans: Awaited<ReturnType<typeof getPublicPlans>> = [];
+  try {
+    plans = await getPublicPlans();
+  } catch {
+    plans = [];
+  }
 
   return (
     <main>
@@ -268,7 +273,7 @@ export default async function HomePage() {
         ) : (
           <p className="mt-8 rounded-xl border border-[var(--line)] bg-white p-6 text-[var(--muted)]">
             Las modalidades no están disponibles en este momento. Puedes consultar la información
-            de planes más adelante.
+            de planes más adelante o actualizar esta página para volver a intentarlo.
           </p>
         )}
 
