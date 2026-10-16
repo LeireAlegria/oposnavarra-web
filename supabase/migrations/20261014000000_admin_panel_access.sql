@@ -45,8 +45,8 @@ FOR UPDATE
 USING (public.es_admin_actual())
 WITH CHECK (
   public.es_admin_actual()
-  AND NEW.rol IN ('usuario', 'admin')
-  AND NEW.id IS NOT NULL
+  AND rol IN ('usuario', 'admin')
+  AND id IS NOT NULL
 );
 
 CREATE POLICY "Los usuarios solo pueden editar su perfil sin cambiar rol"
@@ -55,7 +55,7 @@ FOR UPDATE
 USING (auth.uid() = id)
 WITH CHECK (
   auth.uid() = id
-  AND OLD.rol = NEW.rol
+  AND rol = 'usuario'
 );
 
 CREATE OR REPLACE FUNCTION public.consultar_admin_panel_resumen()

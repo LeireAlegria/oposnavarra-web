@@ -203,15 +203,19 @@ DECLARE
   v_temas jsonb;
   v_resultado jsonb;
 BEGIN
-  SELECT ti, c.nombre
-  INTO v_intento, v_convocatoria_nombre
+  SELECT ti.*
+  INTO v_intento
   FROM public.test_intentos ti
-  JOIN public.convocatorias c ON c.id = ti.convocatoria_id
   WHERE ti.id = p_test_intento_id;
 
   IF NOT FOUND THEN
     RETURN NULL;
   END IF;
+
+  SELECT c.nombre
+  INTO v_convocatoria_nombre
+  FROM public.convocatorias c
+  WHERE c.id = v_intento.convocatoria_id;
 
   SELECT coalesce(
     jsonb_agg(
