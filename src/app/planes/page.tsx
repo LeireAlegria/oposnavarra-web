@@ -9,7 +9,12 @@ export const metadata = {
 };
 
 export default async function PlansPage() {
-  const plans = await getPublicPlans();
+  let plans: Awaited<ReturnType<typeof getPublicPlans>> | null;
+  try {
+    plans = await getPublicPlans();
+  } catch {
+    plans = null;
+  }
 
   return (
     <main className="page-shell py-10 md:py-14">
@@ -24,7 +29,7 @@ export default async function PlansPage() {
         </p>
       </section>
 
-      <section className="mt-10 grid gap-6 lg:grid-cols-3">
+      {plans && plans.length > 0 ? <section className="mt-10 grid gap-6 lg:grid-cols-3">
         {plans.map((plan) => (
           <article key={plan.code} className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_16px_42px_rgba(23,60,58,0.04)]">
             <div className="flex items-center justify-between gap-4">
@@ -62,23 +67,25 @@ export default async function PlansPage() {
               </li>
             </ul>
 
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="mt-7 inline-flex w-full items-center justify-center rounded-full border border-[var(--line)] bg-[rgba(23,60,58,0.02)] px-4 py-3 font-sans text-sm font-semibold text-[var(--muted)] cursor-not-allowed"
+            <Link
+              href={`/contratar?plan=${encodeURIComponent(plan.id)}`}
+              className="mt-7 inline-flex w-full items-center justify-center rounded-full bg-[var(--coral)] px-4 py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#d95d4d]"
             >
-              Pago no disponible
-            </button>
+              Elegir plan
+            </Link>
           </article>
         ))}
-      </section>
+      </section> : plans ? <section role="status" className="mt-10 rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 text-[var(--muted)]">
+        No hay planes disponibles en este momento. Actualiza la página más tarde.
+      </section> : <section role="alert" className="mt-10 rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 text-[var(--muted)]">
+        No se pudieron cargar los planes ahora. Actualiza la página para volver a intentarlo.
+      </section>}
 
       <section className="mt-10 rounded-[2rem] border border-[var(--line)] bg-[rgba(22,31,29,0.04)] p-6 md:p-8">
         <p className="eyebrow">Información</p>
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="max-w-2xl text-[var(--muted)]">
-            El flujo de contratación y la gestión de la suscripción se integrarán con la especificación de la plataforma y la pasarela de pago. Mientras tanto, estas modalidades se muestran con el importe total del periodo y la renovación automática, sin simular compras.
+            El acceso continúa hasta el final del periodo pagado aunque canceles la renovación. Los pagos se procesan de forma segura en Stripe.
           </div>
           <Link href="/contacto" className="inline-flex items-center justify-center rounded-full border border-[var(--ink)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)] transition-colors hover:bg-white/70">
             Consulta dudas

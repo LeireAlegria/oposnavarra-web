@@ -1,13 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 
 import { signUpWithEmail } from '@/lib/auth';
+import { getSafeInternalPath } from '@/lib/navigation';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = getSafeInternalPath(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -42,7 +45,7 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    const result = await signUpWithEmail(email, password);
+    const result = await signUpWithEmail(email, password, next);
     setIsSubmitting(false);
 
     if (result.error) {
@@ -51,7 +54,9 @@ export default function RegisterPage() {
     }
 
     setSuccess('Revisa tu correo para activar tu cuenta');
-    router.push(`/verificar-correo?email=${encodeURIComponent(email)}`);
+    router.push(
+      `/verificar-correo?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`,
+    );
   }
 
   return (
@@ -112,7 +117,7 @@ export default function RegisterPage() {
         </form>
 
         <div className="auth-links">
-          <Link href="/acceder">Ya tengo cuenta</Link>
+          <Link href={`/acceder?next=${encodeURIComponent(next)}`}>Ya tengo cuenta</Link>
         </div>
 
         {error ? (

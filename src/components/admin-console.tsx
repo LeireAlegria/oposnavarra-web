@@ -1,0 +1,1847 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+import { createClient } from '@/lib/supabase/client';
+
+type SectionKey =
+  | 'resumen'
+  | 'convocatorias'
+  | 'temas'
+  | 'examenes'
+  | 'preguntas'
+  | 'usuarios'
+  | 'suscripciones'
+  | 'planes';
+
+type Convocatoria = {
+  id: string;
+  nombre: string;
+  descripcion?: string | null;
+  activo?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  convocatoria_tema?: Array<{ count: number }>;
+  convocatoria_examen?: Array<{ count: number }>;
+};
+
+type Tema = {
+  id: string;
+  nombre: string;
+  descripcion?: string | null;
+  activo?: boolean;
+  created_at?: string;
+};
+
+type Examen = {
+  id: string;
+  nombre: string;
+  descripcion?: string | null;
+  es_oficial?: boolean;
+  created_at?: string;
+};
+
+type Respuesta = {
+  id?: string;
+  orden: number;
+  texto: string;
+  es_correcta: boolean;
+};
+
+type Pregunta = {
+  id: string;
+  enunciado: string;
+  estado?: string;
+  origen?: string;
+  situacion?: string;
+  examen_id?: string | null;
+  created_at?: string;
+  respuestas?: Respuesta[];
+};
+
+type Perfil = {
+  id: string;
+  rol?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type Plan = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  activo?: boolean;
+  precio_centimos?: number;
+  duracion_meses?: number;
+};
+
+type Suscripcion = {
+  id: string;
+  usuario_id: string;
+  estado?: string;
+  periodo_inicio?: string | null;
+  periodo_fin?: string | null;
+  plan_id?: string | null;
+  precio_centimos?: number;
+  duracion_meses?: number;
+  cancelar_al_final_del_periodo?: boolean;
+  planes?: { nombre?: string | null } | null;
+};
+
+type QuestionForm = {
+  enunciado: string;
+  estado: 'revision' | 'publicada' | 'desactivada';
+  origen: 'propia' | 'oficial';
+  situacion: 'ordinaria' | 'reserva' | 'anulada';
+  examen_id: string;
+  answers: Respuesta[];
+  topicIds: string[];
+};
+
+const emptyQuestionForm: QuestionForm = {
+  enunciado: '',
+  estado: 'revision',
+  origen: 'propia',
+  situacion: 'ordinaria',
+  examen_id: '',
+  answers: [
+    { orden: 1, texto: '', es_correcta: false },
+    { orden: 2, texto: '', es_correcta: false },
+    { orden: 3, texto: '', es_correcta: false },
+    { orden: 4, texto: '', es_correcta: false },
+  ],
+  topicIds: [],
+};
+
+const sectionLabels: Record<SectionKey, string> = {
+  resumen: 'Vista general',
+  convocatorias: 'Convocatorias',
+  temas: 'Temas',
+  examenes: 'Exámenes',
+  preguntas: 'Banco de preguntas',
+  usuarios: 'Usuarios',
+  suscripciones: 'Suscripciones',
+  planes: 'Planes',
+};
+
+const PAGE_SIZE = 8;
+
+function getPageItems<T>(items: T[], page: number) {
+  const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const start = (safePage - 1) * PAGE_SIZE;
+
+  return {
+    items: items.slice(start, start + PAGE_SIZE),
+    page: safePage,
+    pageCount,
+  };
+}
+
+export function AdminConsole({ adminEmail }: { adminEmail: string }) {
+  const router = useRouter();
+  const [activeSection, setActiveSection] = useState<SectionKey>('resumen');
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilter, setActiveFilter] = useState('todos');
+  const [planFilter, setPlanFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [convocatorias, setConvocatorias] = useState<Convocatoria[]>([]);
+  const [temas, setTemas] = useState<Tema[]>([]);
+  const [examenes, setExamenes] = useState<Examen[]>([]);
+  const [preguntas, setPreguntas] = useState<Pregunta[]>([]);
+  const [perfiles, setPerfiles] = useState<Perfil[]>([]);
+  const [planes, setPlanes] = useState<Plan[]>([]);
+  const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
+  const [stats, setStats] = useState({
+    convocatorias: 0,
+    temas: 0,
+    examenes: 0,
+    preguntas: 0,
+    usuarios: 0,
+    suscripcionesActivas: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+  const [remoteCounts, setRemoteCounts] = useState({ preguntas: 0, usuarios: 0, suscripciones: 0 });
+  const [errorMessage, setErrorMessage] = useState('');
+  const [questionForm, setQuestionForm] = useState<QuestionForm>(emptyQuestionForm);
+
+  const supabase = useMemo(() => createClient(), []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      const now = new Date().toISOString();
+      const [
+        convocatoriasResult,
+        temasResult,
+        examenesResult,
+        preguntasResult,
+        perfilesResult,
+        planesResult,
+        suscripcionesResult,
+        convocatoriasCountResult,
+        temasCountResult,
+        examenesCountResult,
+        preguntasCountResult,
+        perfilesCountResult,
+        activeSubscriptionsCountResult,
+      ] = await Promise.all([
+        supabase
+          .from('convocatorias')
+          .select('*, convocatoria_tema(count), convocatoria_examen(count)')
+          .order('created_at', { ascending: false }),
+        supabase.from('temas').select('*').order('created_at', { ascending: false }),
+        supabase.from('examenes').select('*').order('created_at', { ascending: false }),
+        supabase
+          .from('preguntas')
+          .select('*, respuestas(*)', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(0, PAGE_SIZE - 1),
+        supabase
+          .from('perfiles')
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(0, PAGE_SIZE - 1),
+        supabase.from('planes').select('*').order('orden', { ascending: true }),
+        supabase
+          .from('suscripciones')
+          .select('*, planes(nombre)', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(0, PAGE_SIZE - 1),
+        supabase.from('convocatorias').select('id', { count: 'exact', head: true }),
+        supabase.from('temas').select('id', { count: 'exact', head: true }),
+        supabase.from('examenes').select('id', { count: 'exact', head: true }),
+        supabase.from('preguntas').select('id', { count: 'exact', head: true }),
+        supabase.from('perfiles').select('id', { count: 'exact', head: true }),
+        supabase
+          .from('suscripciones')
+          .select('id', { count: 'exact', head: true })
+          .eq('estado', 'activa')
+          .lte('periodo_inicio', now)
+          .gt('periodo_fin', now),
+      ]);
+
+      if (convocatoriasResult.error) throw convocatoriasResult.error;
+      if (temasResult.error) throw temasResult.error;
+      if (examenesResult.error) throw examenesResult.error;
+      if (preguntasResult.error) throw preguntasResult.error;
+      if (perfilesResult.error) throw perfilesResult.error;
+      if (planesResult.error) throw planesResult.error;
+      if (suscripcionesResult.error) throw suscripcionesResult.error;
+      const countErrors = [
+        convocatoriasCountResult.error,
+        temasCountResult.error,
+        examenesCountResult.error,
+        preguntasCountResult.error,
+        perfilesCountResult.error,
+        activeSubscriptionsCountResult.error,
+      ];
+      const countError = countErrors.find(Boolean);
+      if (countError) throw countError;
+
+      setConvocatorias((convocatoriasResult.data ?? []) as Convocatoria[]);
+      setTemas((temasResult.data ?? []) as Tema[]);
+      setExamenes((examenesResult.data ?? []) as Examen[]);
+      setPreguntas((preguntasResult.data ?? []) as Pregunta[]);
+      setPerfiles((perfilesResult.data ?? []) as Perfil[]);
+      setPlanes((planesResult.data ?? []) as Plan[]);
+      setSuscripciones((suscripcionesResult.data ?? []) as Suscripcion[]);
+      setStats({
+        convocatorias: convocatoriasCountResult.count ?? 0,
+        temas: temasCountResult.count ?? 0,
+        examenes: examenesCountResult.count ?? 0,
+        preguntas: preguntasCountResult.count ?? 0,
+        usuarios: perfilesCountResult.count ?? 0,
+        suscripcionesActivas: activeSubscriptionsCountResult.count ?? 0,
+      });
+      setRemoteCounts({
+        preguntas: preguntasResult.count ?? 0,
+        usuarios: perfilesResult.count ?? 0,
+        suscripciones: suscripcionesResult.count ?? 0,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'No se pudo cargar el panel de administración.';
+      setErrorMessage(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      (activeSection !== 'preguntas' &&
+        activeSection !== 'usuarios' &&
+        activeSection !== 'suscripciones')
+    ) {
+      setListLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const from = (currentPage - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    setListLoading(true);
+
+    async function loadCurrentPage() {
+      if (activeSection === 'preguntas') {
+        let request = supabase
+          .from('preguntas')
+          .select('*, respuestas(*)', { count: 'exact' })
+          .order('created_at', { ascending: false });
+        if (searchTerm.trim()) request = request.ilike('enunciado', `%${searchTerm.trim()}%`);
+        if (activeFilter !== 'todos') request = request.eq('estado', activeFilter);
+        const { data, count, error } = await request.range(from, to);
+        if (cancelled) return;
+        if (error) {
+          setErrorMessage('No se pudo cargar la página de preguntas. Inténtalo de nuevo.');
+        } else {
+          setPreguntas((data ?? []) as Pregunta[]);
+          setRemoteCounts((current) => ({ ...current, preguntas: count ?? 0 }));
+          setErrorMessage('');
+        }
+      } else if (activeSection === 'usuarios') {
+        let request = supabase
+          .from('perfiles')
+          .select('*', { count: 'exact' })
+          .order('created_at', { ascending: false });
+        if (activeFilter !== 'todos') request = request.eq('rol', activeFilter);
+        if (searchTerm.trim()) {
+          if (
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              searchTerm.trim(),
+            )
+          ) {
+            request = request.eq('id', searchTerm.trim());
+          } else {
+            setPerfiles([]);
+            setRemoteCounts((current) => ({ ...current, usuarios: 0 }));
+            setListLoading(false);
+            return;
+          }
+        }
+        const { data, count, error } = await request.range(from, to);
+        if (cancelled) return;
+        if (error) {
+          setErrorMessage('No se pudo cargar la página de usuarios. Inténtalo de nuevo.');
+        } else {
+          setPerfiles((data ?? []) as Perfil[]);
+          setRemoteCounts((current) => ({ ...current, usuarios: count ?? 0 }));
+          setErrorMessage('');
+        }
+      } else {
+        let request = supabase
+          .from('suscripciones')
+          .select('*, planes(nombre)', { count: 'exact' })
+          .order('created_at', { ascending: false });
+        if (activeFilter !== 'todos') request = request.eq('estado', activeFilter);
+        if (planFilter) request = request.eq('plan_id', planFilter);
+        if (searchTerm.trim()) {
+          if (
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              searchTerm.trim(),
+            )
+          ) {
+            request = request.eq('usuario_id', searchTerm.trim());
+          } else {
+            request = request.ilike('planes.nombre', `%${searchTerm.trim()}%`);
+          }
+        }
+        const { data, count, error } = await request.range(from, to);
+        if (cancelled) return;
+        if (error) {
+          setErrorMessage('No se pudo cargar la página de suscripciones. Inténtalo de nuevo.');
+        } else {
+          setSuscripciones((data ?? []) as Suscripcion[]);
+          setRemoteCounts((current) => ({ ...current, suscripciones: count ?? 0 }));
+          setErrorMessage('');
+        }
+      }
+
+      if (!cancelled) setListLoading(false);
+    }
+
+    void loadCurrentPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFilter, activeSection, currentPage, loading, planFilter, searchTerm, supabase]);
+
+  async function toggleEntityActive(
+    table: 'convocatorias' | 'temas' | 'planes',
+    id: string,
+    currentValue: boolean,
+  ) {
+    const nextValue = !currentValue;
+    const { error } = await supabase.from(table).update({ activo: nextValue }).eq('id', id);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    if (table === 'convocatorias') {
+      setConvocatorias((current) =>
+        current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
+      );
+    }
+    if (table === 'temas') {
+      setTemas((current) =>
+        current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
+      );
+    }
+    if (table === 'planes') {
+      setPlanes((current) =>
+        current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
+      );
+    }
+  }
+
+  async function saveConvocatoria(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      nombre: String(formData.get('nombre') ?? '').trim(),
+      descripcion: String(formData.get('descripcion') ?? '').trim() || null,
+      activo: String(formData.get('activo') ?? 'true') === 'true',
+    };
+
+    if (!payload.nombre) {
+      setErrorMessage('El nombre de la convocatoria es obligatorio.');
+      return;
+    }
+
+    const { error } = await supabase.from('convocatorias').insert(payload);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    event.currentTarget.reset();
+    await loadData();
+  }
+
+  async function saveTema(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      nombre: String(formData.get('nombre') ?? '').trim(),
+      descripcion: String(formData.get('descripcion') ?? '').trim() || null,
+      activo: String(formData.get('activo') ?? 'true') === 'true',
+    };
+
+    if (!payload.nombre) {
+      setErrorMessage('El nombre del tema es obligatorio.');
+      return;
+    }
+
+    const { error } = await supabase.from('temas').insert(payload);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    event.currentTarget.reset();
+    await loadData();
+  }
+
+  async function saveExamen(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      nombre: String(formData.get('nombre') ?? '').trim(),
+      descripcion: String(formData.get('descripcion') ?? '').trim() || null,
+      es_oficial: String(formData.get('es_oficial') ?? 'true') === 'true',
+    };
+
+    if (!payload.nombre) {
+      setErrorMessage('El nombre del examen es obligatorio.');
+      return;
+    }
+
+    const { error } = await supabase.from('examenes').insert(payload);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    event.currentTarget.reset();
+    await loadData();
+  }
+
+  async function saveQuestion(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!questionForm.enunciado.trim()) {
+      setErrorMessage('El enunciado de la pregunta es obligatorio.');
+      return;
+    }
+
+    const validAnswers = questionForm.answers.filter((answer) => answer.texto.trim());
+    if (validAnswers.length !== 4) {
+      setErrorMessage('Cada pregunta debe tener exactamente cuatro opciones con texto.');
+      return;
+    }
+    if (validAnswers.filter((answer) => answer.es_correcta).length !== 1) {
+      setErrorMessage('Cada pregunta debe tener exactamente una respuesta correcta.');
+      return;
+    }
+
+    try {
+      const insertion = await supabase
+        .from('preguntas')
+        .insert({
+          enunciado: questionForm.enunciado,
+          estado: questionForm.estado,
+          origen: questionForm.origen,
+          situacion: questionForm.situacion,
+          examen_id: questionForm.examen_id || null,
+        })
+        .select('id')
+        .single();
+
+      if (insertion.error) {
+        throw insertion.error;
+      }
+
+      const questionId = insertion.data.id;
+
+      const answerRows = validAnswers.map((answer, index) => ({
+        pregunta_id: questionId,
+        orden: index + 1,
+        texto: answer.texto.trim(),
+        es_correcta: answer.es_correcta,
+      }));
+
+      const { error } = await supabase.from('respuestas').insert(answerRows);
+      if (error) {
+        throw error;
+      }
+
+      if (questionForm.topicIds.length > 0) {
+        const topicRows = questionForm.topicIds.map((topicId) => ({
+          pregunta_id: questionId,
+          tema_id: topicId,
+        }));
+
+        const { error: topicError } = await supabase.from('pregunta_tema').insert(topicRows);
+        if (topicError) {
+          throw topicError;
+        }
+      }
+
+      setQuestionForm(emptyQuestionForm);
+      event.currentTarget.reset();
+      await loadData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo guardar la pregunta.';
+      setErrorMessage(message);
+    }
+  }
+
+  async function toggleProfileRole(profileId: string, currentRole: string | null) {
+    const nextRole = currentRole === 'admin' ? 'usuario' : 'admin';
+    const { error } = await supabase.from('perfiles').update({ rol: nextRole }).eq('id', profileId);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setPerfiles((current) =>
+      current.map((item) => (item.id === profileId ? { ...item, rol: nextRole } : item)),
+    );
+  }
+
+  const summaryCards = [
+    { label: 'Convocatorias', value: stats.convocatorias, icon: '▤' },
+    { label: 'Temas', value: stats.temas, icon: '☷' },
+    { label: 'Exámenes', value: stats.examenes, icon: '▣' },
+    { label: 'Preguntas', value: stats.preguntas, icon: '？' },
+    { label: 'Usuarios', value: stats.usuarios, icon: '♙' },
+    { label: 'Suscripciones activas', value: stats.suscripcionesActivas, icon: '↻' },
+  ];
+
+  const filteredConvocatorias = useMemo(() => {
+    const query = searchTerm.trim().toLocaleLowerCase('es');
+    return convocatorias
+      .filter(
+        (item) =>
+          !query ||
+          `${item.nombre} ${item.descripcion ?? ''}`.toLocaleLowerCase('es').includes(query),
+      )
+      .filter(
+        (item) =>
+          activeSection !== 'convocatorias' ||
+          activeFilter === 'todos' ||
+          String(Boolean(item.activo)) === activeFilter,
+      )
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es') * (sortDirection === 'asc' ? 1 : -1));
+  }, [activeFilter, activeSection, convocatorias, searchTerm, sortDirection]);
+  const filteredTemas = useMemo(
+    () =>
+      temas
+        .filter((item) =>
+          `${item.nombre} ${item.descripcion ?? ''}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'temas' ||
+            activeFilter === 'todos' ||
+            String(Boolean(item.activo)) === activeFilter,
+        ),
+    [activeFilter, activeSection, searchTerm, temas],
+  );
+  const filteredExamenes = useMemo(
+    () =>
+      examenes
+        .filter((item) =>
+          `${item.nombre} ${item.descripcion ?? ''}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'examenes' ||
+            activeFilter === 'todos' ||
+            String(Boolean(item.es_oficial)) === activeFilter,
+        ),
+    [activeFilter, activeSection, examenes, searchTerm],
+  );
+  const filteredPreguntas = useMemo(
+    () =>
+      preguntas
+        .filter((item) =>
+          `${item.enunciado} ${item.estado ?? ''} ${item.origen ?? ''} ${item.situacion ?? ''}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'preguntas' ||
+            activeFilter === 'todos' ||
+            item.estado === activeFilter,
+        ),
+    [activeFilter, activeSection, preguntas, searchTerm],
+  );
+  const filteredProfiles = useMemo(
+    () =>
+      perfiles
+        .filter((item) =>
+          `${item.id} ${item.rol ?? 'usuario'}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'usuarios' ||
+            activeFilter === 'todos' ||
+            (item.rol ?? 'usuario') === activeFilter,
+        ),
+    [activeFilter, activeSection, perfiles, searchTerm],
+  );
+  const filteredSubscriptions = useMemo(
+    () =>
+      suscripciones
+        .filter((item) =>
+          `${item.usuario_id} ${item.planes?.nombre ?? ''} ${item.estado ?? ''}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'suscripciones' ||
+            activeFilter === 'todos' ||
+            item.estado === activeFilter,
+        )
+        .filter(
+          (item) => activeSection !== 'suscripciones' || !planFilter || item.plan_id === planFilter,
+        ),
+    [activeFilter, activeSection, planFilter, searchTerm, suscripciones],
+  );
+  const filteredPlans = useMemo(
+    () =>
+      planes
+        .filter((item) =>
+          `${item.nombre} ${item.codigo}`
+            .toLocaleLowerCase('es')
+            .includes(searchTerm.trim().toLocaleLowerCase('es')),
+        )
+        .filter(
+          (item) =>
+            activeSection !== 'planes' ||
+            activeFilter === 'todos' ||
+            String(Boolean(item.activo)) === activeFilter,
+        ),
+    [activeFilter, activeSection, planes, searchTerm],
+  );
+
+  const activeRowCount =
+    activeSection === 'convocatorias'
+      ? filteredConvocatorias.length
+      : activeSection === 'temas'
+        ? filteredTemas.length
+        : activeSection === 'examenes'
+          ? filteredExamenes.length
+          : activeSection === 'preguntas'
+            ? remoteCounts.preguntas
+            : activeSection === 'usuarios'
+              ? remoteCounts.usuarios
+              : activeSection === 'suscripciones'
+                ? remoteCounts.suscripciones
+                : filteredPlans.length;
+  const activePageCount = Math.max(1, Math.ceil(activeRowCount / PAGE_SIZE));
+  const activePage = Math.min(currentPage, activePageCount);
+  const paginatedConvocatorias = getPageItems(filteredConvocatorias, currentPage).items;
+  const paginatedTemas = getPageItems(filteredTemas, currentPage).items;
+  const paginatedExamenes = getPageItems(filteredExamenes, currentPage).items;
+  const paginatedPreguntas =
+    activeSection === 'preguntas' ? preguntas : getPageItems(filteredPreguntas, currentPage).items;
+  const paginatedProfiles =
+    activeSection === 'usuarios' ? perfiles : getPageItems(filteredProfiles, currentPage).items;
+  const paginatedSubscriptions =
+    activeSection === 'suscripciones'
+      ? suscripciones
+      : getPageItems(filteredSubscriptions, currentPage).items;
+  const paginatedPlans = getPageItems(filteredPlans, currentPage).items;
+
+  const changeSection = (section: SectionKey) => {
+    setActiveSection(section);
+    setSearchTerm('');
+    setActiveFilter('todos');
+    setPlanFilter('');
+    setCurrentPage(1);
+    setIsMobileNavigationOpen(false);
+  };
+
+  const renderResumen = () => (
+    <div className="space-y-6">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {summaryCards.map((card) => (
+          <article
+            key={card.label}
+            className="flex items-center justify-between gap-4 rounded-2xl border border-[#e5e1d8] bg-white p-5 shadow-[0_12px_34px_rgba(48,47,43,0.035)]"
+          >
+            <div>
+              <p className="text-sm text-[#77756e]">{card.label}</p>
+              <p className="mt-2 font-serif text-3xl text-[#302f2b]">{card.value}</p>
+            </div>
+            <span
+              aria-hidden="true"
+              className="grid h-11 w-11 place-items-center rounded-xl bg-[#f8eeeb] text-xl text-[#bd3734]"
+            >
+              {card.icon}
+            </span>
+          </article>
+        ))}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-[#e5e1d8] bg-white">
+        <div className="flex flex-col gap-4 border-b border-[#e5e1d8] p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-serif text-2xl text-[#302f2b]">Convocatorias recientes</h2>
+            <p className="mt-1 text-sm text-[#77756e]">
+              Consulta y administra el catálogo disponible.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => changeSection('convocatorias')}
+            className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+          >
+            + Nueva convocatoria
+          </button>
+        </div>
+        <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <label className="sr-only" htmlFor="dashboard-convocatoria-search">
+            Buscar convocatoria
+          </label>
+          <input
+            id="dashboard-convocatoria-search"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Buscar convocatoria..."
+            className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-[#fdfcf9] px-3 text-sm sm:max-w-sm"
+          />
+          <button
+            type="button"
+            onClick={() => changeSection('examenes')}
+            className="min-h-11 rounded-lg border border-[#d8d2c8] px-4 font-sans text-sm font-semibold text-[#393833] hover:bg-[#f8f7f3]"
+          >
+            Crear examen
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+            <thead className="bg-[#f8f7f3] text-xs uppercase tracking-wide text-[#77756e]">
+              <tr>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setSortDirection((value) => (value === 'asc' ? 'desc' : 'asc'))}
+                    className="inline-flex items-center gap-2"
+                  >
+                    Convocatoria{' '}
+                    <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                  </button>
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  Temas
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  Exámenes
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  Estado
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  Modificada
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
+                  <span className="sr-only">Acciones</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eeeae2]">
+              {paginatedConvocatorias.map((item) => (
+                <tr key={item.id} className="text-[#393833]">
+                  <td className="px-5 py-4">
+                    <p className="font-semibold">{item.nombre}</p>
+                    <p className="mt-1 max-w-sm truncate text-xs text-[#77756e]">
+                      {item.descripcion ?? 'Sin descripción'}
+                    </p>
+                  </td>
+                  <td className="px-5 py-4">{item.convocatoria_tema?.[0]?.count ?? 0}</td>
+                  <td className="px-5 py-4">{item.convocatoria_examen?.[0]?.count ?? 0}</td>
+                  <td className="px-5 py-4">
+                    <span
+                      className={
+                        item.activo
+                          ? 'rounded-full bg-[#eaf3eb] px-2.5 py-1 text-xs font-semibold text-[#356a43]'
+                          : 'rounded-full bg-[#f1eee9] px-2.5 py-1 text-xs font-semibold text-[#77756e]'
+                      }
+                    >
+                      {item.activo ? 'Activa' : 'Inactiva'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 text-xs text-[#77756e]">
+                    {item.updated_at
+                      ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(
+                          new Date(item.updated_at),
+                        )
+                      : '—'}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => changeSection('convocatorias')}
+                      className="font-semibold text-[#bd3734] hover:underline"
+                    >
+                      Gestionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filteredConvocatorias.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-sm text-[#77756e]">
+                    No hay convocatorias que coincidan con la búsqueda.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between border-t border-[#e5e1d8] px-5 py-4 text-sm text-[#77756e]">
+          <span>{filteredConvocatorias.length} convocatorias</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Página anterior"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              className="h-9 w-9 rounded-lg border border-[#e5e1d8] disabled:opacity-40"
+            >
+              ‹
+            </button>
+            <span>
+              {getPageItems(filteredConvocatorias, currentPage).page} /{' '}
+              {getPageItems(filteredConvocatorias, currentPage).pageCount}
+            </span>
+            <button
+              type="button"
+              aria-label="Página siguiente"
+              disabled={currentPage >= getPageItems(filteredConvocatorias, currentPage).pageCount}
+              onClick={() =>
+                setCurrentPage((page) =>
+                  Math.min(getPageItems(filteredConvocatorias, page).pageCount, page + 1),
+                )
+              }
+              className="h-9 w-9 rounded-lg border border-[#e5e1d8] disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderConvocatorias = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="space-y-3">
+        {getPageItems(filteredConvocatorias, currentPage).items.map((item) => (
+          <article key={item.id} className="rounded-2xl border border-[#e5e1d8] bg-white p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {item.descripcion ?? 'Sin descripción'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggleEntityActive('convocatorias', item.id, Boolean(item.activo))}
+                className={[
+                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                ].join(' ')}
+              >
+                {item.activo ? 'Activa' : 'Inactiva'}
+              </button>
+            </div>
+          </article>
+        ))}
+        {filteredConvocatorias.length === 0 ? (
+          <p className="rounded-xl border border-[#e5e1d8] bg-white p-8 text-center text-sm text-[#77756e]">
+            No hay convocatorias que coincidan con la búsqueda.
+          </p>
+        ) : null}
+      </div>
+
+      <form
+        onSubmit={saveConvocatoria}
+        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+      >
+        <p className="eyebrow">Crear convocatoria</p>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
+            <input
+              name="nombre"
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
+            <textarea
+              name="descripcion"
+              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+            <input type="checkbox" name="activo" defaultChecked />
+            Activa
+          </label>
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+          >
+            Guardar convocatoria
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderTemas = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="space-y-4">
+        {paginatedTemas.map((item) => (
+          <article
+            key={item.id}
+            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {item.descripcion ?? 'Sin descripción'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggleEntityActive('temas', item.id, Boolean(item.activo))}
+                className={[
+                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                ].join(' ')}
+              >
+                {item.activo ? 'Activo' : 'Inactivo'}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <form
+        onSubmit={saveTema}
+        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+      >
+        <p className="eyebrow">Crear tema</p>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
+            <input
+              name="nombre"
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
+            <textarea
+              name="descripcion"
+              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+            <input type="checkbox" name="activo" defaultChecked />
+            Activo
+          </label>
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+          >
+            Guardar tema
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderExamenes = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="space-y-4">
+        {paginatedExamenes.map((item) => (
+          <article
+            key={item.id}
+            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+          >
+            <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {item.descripcion ?? 'Sin descripción'}
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <form
+        onSubmit={saveExamen}
+        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+      >
+        <p className="eyebrow">Crear examen</p>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
+            <input
+              name="nombre"
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
+            <textarea
+              name="descripcion"
+              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+            <input type="checkbox" name="es_oficial" defaultChecked />
+            Examen oficial
+          </label>
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+          >
+            Guardar examen
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderPreguntas = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="space-y-4">
+        {paginatedPreguntas.map((item) => (
+          <article
+            key={item.id}
+            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+          >
+            <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
+              {item.estado}
+            </p>
+            <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.enunciado}</h3>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Origen: {item.origen} · Situación: {item.situacion}
+            </p>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {item.respuestas?.length ?? 0} respuestas
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <form
+        onSubmit={saveQuestion}
+        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+      >
+        <p className="eyebrow">Nueva pregunta</p>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Enunciado</span>
+            <textarea
+              value={questionForm.enunciado}
+              onChange={(event) =>
+                setQuestionForm((current) => ({ ...current, enunciado: event.target.value }))
+              }
+              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Estado</span>
+              <select
+                value={questionForm.estado}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({
+                    ...current,
+                    estado: event.target.value as QuestionForm['estado'],
+                  }))
+                }
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              >
+                <option value="revision">Revisión</option>
+                <option value="publicada">Publicada</option>
+                <option value="desactivada">Desactivada</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Origen</span>
+              <select
+                value={questionForm.origen}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({
+                    ...current,
+                    origen: event.target.value as QuestionForm['origen'],
+                  }))
+                }
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              >
+                <option value="propia">Propia</option>
+                <option value="oficial">Oficial</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Situación</span>
+              <select
+                value={questionForm.situacion}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({
+                    ...current,
+                    situacion: event.target.value as QuestionForm['situacion'],
+                  }))
+                }
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              >
+                <option value="ordinaria">Ordinaria</option>
+                <option value="reserva">Reserva</option>
+                <option value="anulada">Anulada</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Examen</span>
+            <select
+              value={questionForm.examen_id}
+              onChange={(event) =>
+                setQuestionForm((current) => ({ ...current, examen_id: event.target.value }))
+              }
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            >
+              <option value="">Sin examen asociado</option>
+              {examenes.map((examen) => (
+                <option key={examen.id} value={examen.id}>
+                  {examen.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div>
+            <p className="mb-2 text-sm font-semibold text-[var(--ink)]">Temas</p>
+            <div className="flex flex-wrap gap-2">
+              {temas.map((tema) => {
+                const selected = questionForm.topicIds.includes(tema.id);
+                return (
+                  <button
+                    key={tema.id}
+                    type="button"
+                    onClick={() =>
+                      setQuestionForm((current) => ({
+                        ...current,
+                        topicIds: selected
+                          ? current.topicIds.filter((id) => id !== tema.id)
+                          : [...current.topicIds, tema.id],
+                      }))
+                    }
+                    className={[
+                      'rounded-full border px-3 py-2 text-xs font-semibold',
+                      selected
+                        ? 'border-[var(--coral)] bg-[rgba(243,111,94,0.08)] text-[var(--coral)]'
+                        : 'border-[var(--line)] bg-white text-[var(--ink)]',
+                    ].join(' ')}
+                  >
+                    {tema.nombre}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {questionForm.answers.map((answer, index) => (
+              <div
+                key={index}
+                className="rounded-xl border border-[var(--line)] bg-[rgba(22,31,29,0.02)] p-3"
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-[var(--ink)]">
+                    Opción {index + 1}
+                  </span>
+                  <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
+                    <input
+                      type="checkbox"
+                      checked={answer.es_correcta}
+                      onChange={(event) =>
+                        setQuestionForm((current) => ({
+                          ...current,
+                          answers: current.answers.map((item, currentIndex) =>
+                            currentIndex === index
+                              ? { ...item, es_correcta: event.target.checked }
+                              : item,
+                          ),
+                        }))
+                      }
+                    />
+                    Correcta
+                  </label>
+                </div>
+                <input
+                  value={answer.texto}
+                  onChange={(event) =>
+                    setQuestionForm((current) => ({
+                      ...current,
+                      answers: current.answers.map((item, currentIndex) =>
+                        currentIndex === index ? { ...item, texto: event.target.value } : item,
+                      ),
+                    }))
+                  }
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                  placeholder={`Texto de la opción ${index + 1}`}
+                />
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+          >
+            Guardar pregunta
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  const renderUsuarios = () => (
+    <div className="space-y-4">
+      {paginatedProfiles.map((item) => (
+        <article
+          key={item.id}
+          className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+        >
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
+                {item.rol ?? 'usuario'}
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.id}</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleProfileRole(item.id, item.rol ?? 'usuario')}
+              className={[
+                'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                item.rol === 'admin'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-200 text-slate-700',
+              ].join(' ')}
+            >
+              {item.rol === 'admin' ? 'Quitar admin' : 'Dar admin'}
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+
+  const renderPlanes = () => (
+    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="space-y-4">
+        {paginatedPlans.map((item) => (
+          <article
+            key={item.id}
+            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {item.codigo} · {(item.precio_centimos ?? 0) / 100} € · {item.duracion_meses ?? 0}{' '}
+                  meses
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggleEntityActive('planes', item.id, Boolean(item.activo))}
+                className={[
+                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                ].join(' ')}
+              >
+                {item.activo ? 'Disponible' : 'No disponible'}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderSuscripciones = () => (
+    <div className="overflow-hidden rounded-2xl border border-[#e5e1d8] bg-white">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+          <thead className="bg-[#f8f7f3] text-xs uppercase tracking-wide text-[#77756e]">
+            <tr>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                Usuario
+              </th>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                Plan
+              </th>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                Estado
+              </th>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                Inicio del periodo
+              </th>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                Fin del periodo
+              </th>
+              <th scope="col" className="px-5 py-3 font-semibold">
+                <span className="sr-only">Detalle</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#eeeae2]">
+            {paginatedSubscriptions.map((item) => (
+              <tr key={item.id} className="text-[#393833]">
+                <td className="px-5 py-4 font-medium">{item.usuario_id}</td>
+                <td className="px-5 py-4">{item.planes?.nombre ?? 'Sin plan'}</td>
+                <td className="px-5 py-4">
+                  <span className="rounded-full bg-[#f1eee9] px-2.5 py-1 text-xs font-semibold">
+                    {item.estado ?? 'Sin estado'}
+                  </span>
+                </td>
+                <td className="px-5 py-4 text-xs text-[#77756e]">
+                  {item.periodo_inicio
+                    ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(
+                        new Date(item.periodo_inicio),
+                      )
+                    : '—'}
+                </td>
+                <td className="px-5 py-4 text-xs text-[#77756e]">
+                  {item.periodo_fin
+                    ? new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(
+                        new Date(item.periodo_fin),
+                      )
+                    : '—'}
+                </td>
+                <td className="px-5 py-4 text-right">
+                  <details className="relative inline-block text-left">
+                    <summary className="cursor-pointer list-none font-semibold text-[#bd3734] hover:underline">
+                      Ver detalle
+                    </summary>
+                    <div className="absolute right-0 z-10 mt-2 w-64 rounded-xl border border-[#e5e1d8] bg-white p-4 text-left text-xs leading-5 shadow-xl">
+                      <p>
+                        <span className="text-[#77756e]">Precio contratado:</span>{' '}
+                        {typeof item.precio_centimos === 'number'
+                          ? `${(item.precio_centimos / 100).toFixed(2)} €`
+                          : 'No disponible'}
+                      </p>
+                      <p>
+                        <span className="text-[#77756e]">Duración:</span>{' '}
+                        {item.duracion_meses ? `${item.duracion_meses} meses` : 'No disponible'}
+                      </p>
+                      <p>
+                        <span className="text-[#77756e]">Renovación:</span>{' '}
+                        {item.cancelar_al_final_del_periodo
+                          ? 'No se renovará'
+                          : 'Según las condiciones del plan'}
+                      </p>
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            ))}
+            {filteredSubscriptions.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-5 py-12 text-center text-sm text-[#77756e]">
+                  No hay suscripciones que coincidan con los filtros.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-[#e5e1d8] px-5 py-4 text-sm text-[#77756e]">
+        {filteredSubscriptions.length} suscripciones · Consulta de solo lectura
+      </p>
+    </div>
+  );
+
+  const renderCurrentSection = () => {
+    switch (activeSection) {
+      case 'convocatorias':
+        return renderConvocatorias();
+      case 'temas':
+        return renderTemas();
+      case 'examenes':
+        return renderExamenes();
+      case 'preguntas':
+        return renderPreguntas();
+      case 'usuarios':
+        return renderUsuarios();
+      case 'suscripciones':
+        return renderSuscripciones();
+      case 'planes':
+        return renderPlanes();
+      case 'resumen':
+      default:
+        return renderResumen();
+    }
+  };
+
+  async function signOut() {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setErrorMessage('No se pudo cerrar la sesión. Inténtalo de nuevo.');
+      return;
+    }
+
+    router.push('/acceder');
+    router.refresh();
+  }
+
+  const pageTitles: Record<SectionKey, string> = {
+    resumen: 'Vista general',
+    convocatorias: 'Convocatorias',
+    temas: 'Temas',
+    examenes: 'Exámenes',
+    preguntas: 'Banco de preguntas',
+    usuarios: 'Usuarios',
+    suscripciones: 'Suscripciones',
+    planes: 'Planes',
+  };
+  const pageDescriptions: Record<SectionKey, string> = {
+    resumen: 'Organiza y gestiona el contenido de OposNavarra desde un único lugar.',
+    convocatorias: 'Gestiona las convocatorias y su disponibilidad.',
+    temas: 'Organiza los temas que forman parte del catálogo.',
+    examenes: 'Consulta y administra los exámenes disponibles.',
+    preguntas: 'Revisa y administra las preguntas del banco.',
+    usuarios: 'Consulta las cuentas y gestiona los permisos administrativos.',
+    suscripciones: 'Consulta el estado y los periodos de las suscripciones.',
+    planes: 'Gestiona la disponibilidad de los planes de contratación.',
+  };
+  const initials = adminEmail.split('@')[0].slice(0, 2).toLocaleUpperCase('es') || 'AD';
+  const navGroups: Array<{ title: string; items: SectionKey[] }> = [
+    { title: 'Vista general', items: ['resumen'] },
+    { title: 'Contenido', items: ['convocatorias', 'temas', 'examenes', 'preguntas'] },
+    { title: 'Comunidad y ventas', items: ['usuarios', 'suscripciones', 'planes'] },
+  ];
+  const filterOptions: Record<SectionKey, Array<{ value: string; label: string }>> = {
+    resumen: [],
+    convocatorias: [
+      { value: 'todos', label: 'Todos los estados' },
+      { value: 'true', label: 'Activas' },
+      { value: 'false', label: 'Inactivas' },
+    ],
+    temas: [
+      { value: 'todos', label: 'Todos los estados' },
+      { value: 'true', label: 'Activos' },
+      { value: 'false', label: 'Inactivos' },
+    ],
+    examenes: [
+      { value: 'todos', label: 'Todos los exámenes' },
+      { value: 'true', label: 'Oficiales' },
+      { value: 'false', label: 'No oficiales' },
+    ],
+    preguntas: [
+      { value: 'todos', label: 'Todos los estados' },
+      { value: 'revision', label: 'En revisión' },
+      { value: 'publicada', label: 'Publicadas' },
+      { value: 'desactivada', label: 'Desactivadas' },
+    ],
+    usuarios: [
+      { value: 'todos', label: 'Todos los roles' },
+      { value: 'usuario', label: 'Usuarios' },
+      { value: 'admin', label: 'Administradores' },
+    ],
+    suscripciones: [
+      { value: 'todos', label: 'Todos los estados' },
+      { value: 'pendiente', label: 'Pendientes' },
+      { value: 'activa', label: 'Activas' },
+      { value: 'vencida', label: 'Vencidas' },
+      { value: 'cancelada', label: 'Canceladas' },
+    ],
+    planes: [
+      { value: 'todos', label: 'Todos los planes' },
+      { value: 'true', label: 'Disponibles' },
+      { value: 'false', label: 'No disponibles' },
+    ],
+  };
+
+  return (
+    <main className="admin-shell min-h-screen bg-[#f7f5ef] text-[#302f2b]">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#e5e1d8] bg-white px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsMobileNavigationOpen((open) => !open)}
+            aria-label={isMobileNavigationOpen ? 'Cerrar navegación' : 'Abrir navegación'}
+            aria-expanded={isMobileNavigationOpen}
+            className="grid h-10 w-10 place-items-center rounded-lg border border-[#e5e1d8] text-lg lg:hidden"
+          >
+            {isMobileNavigationOpen ? '×' : '☰'}
+          </button>
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-[#bd3734] font-sans text-xs font-bold text-white">
+            ON
+          </span>
+          <span className="font-sans text-base font-bold tracking-tight">
+            opos<span className="text-[#bd3734]">navarra</span>
+          </span>
+          <span className="hidden border-l border-[#e5e1d8] pl-3 text-xs font-medium text-[#77756e] sm:inline">
+            ADMINISTRACIÓN
+          </span>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <a
+            href="/plataforma"
+            className="hidden text-sm font-medium text-[#6d6a63] hover:text-[#bd3734] sm:inline"
+          >
+            Ver plataforma ↗
+          </a>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsAccountMenuOpen((open) => !open)}
+              aria-expanded={isAccountMenuOpen}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-[#f8f7f3]"
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-[#f8eeeb] text-xs font-semibold text-[#bd3734]">
+                {initials}
+              </span>
+              <span className="hidden max-w-40 truncate text-sm font-medium sm:block">
+                {adminEmail}
+              </span>
+              <span aria-hidden="true" className="text-xs">
+                ⌄
+              </span>
+            </button>
+            {isAccountMenuOpen ? (
+              <div className="absolute right-0 top-12 z-40 w-56 rounded-xl border border-[#e5e1d8] bg-white p-2 shadow-xl">
+                <p className="truncate px-3 py-2 text-xs text-[#77756e]">{adminEmail}</p>
+                <a
+                  href="/plataforma"
+                  className="block rounded-lg px-3 py-2 text-sm hover:bg-[#f8f7f3]"
+                >
+                  Mi cuenta
+                </a>
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-[#bd3734] hover:bg-[#fbefec]"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-[1600px] lg:grid-cols-[248px_minmax(0,1fr)]">
+        {isMobileNavigationOpen ? (
+          <button
+            type="button"
+            aria-label="Cerrar navegación"
+            onClick={() => setIsMobileNavigationOpen(false)}
+            className="fixed inset-0 top-16 z-10 bg-black/25 lg:hidden"
+          />
+        ) : null}
+        <aside
+          className={[
+            'z-20 border-r border-[#e5e1d8] bg-[#fbfaf7] p-4 lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)]',
+            isMobileNavigationOpen
+              ? 'fixed inset-y-16 left-0 block w-[min(84vw,300px)] overflow-y-auto shadow-2xl'
+              : 'hidden',
+          ].join(' ')}
+        >
+          <nav aria-label="Navegación administrativa" className="space-y-6">
+            {navGroups.map((group) => (
+              <div key={group.title}>
+                <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#99958c]">
+                  {group.title}
+                </p>
+                <div className="grid gap-1">
+                  {group.items.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => changeSection(key)}
+                      aria-current={activeSection === key ? 'page' : undefined}
+                      className={[
+                        'flex min-h-10 items-center gap-3 rounded-lg px-3 text-left text-sm transition-colors',
+                        activeSection === key
+                          ? 'bg-[#f8eae7] font-semibold text-[#b83431]'
+                          : 'text-[#67655f] hover:bg-white hover:text-[#302f2b]',
+                      ].join(' ')}
+                    >
+                      <span aria-hidden="true" className="w-5 text-center text-base">
+                        {key === 'resumen'
+                          ? '⌂'
+                          : key === 'convocatorias'
+                            ? '▤'
+                            : key === 'temas'
+                              ? '☷'
+                              : key === 'examenes'
+                                ? '▣'
+                                : key === 'preguntas'
+                                  ? '?'
+                                  : key === 'usuarios'
+                                    ? '♙'
+                                    : key === 'suscripciones'
+                                      ? '↻'
+                                      : '◇'}
+                      </span>
+                      {sectionLabels[key]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
+          <p className="mt-10 border-t border-[#e5e1d8] px-3 pt-5 text-xs leading-5 text-[#8b887f]">
+            Gestión segura del contenido y las cuentas de OposNavarra.
+          </p>
+        </aside>
+
+        <section className="min-w-0 px-4 py-7 sm:px-6 lg:px-10 lg:py-9">
+          <div className="mb-7 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p className="mb-2 text-xs text-[#8b887f]">
+                Administración <span className="mx-2">/</span> {sectionLabels[activeSection]}
+              </p>
+              <h1 className="font-serif text-3xl font-normal tracking-[-0.04em] text-[#302f2b] sm:text-4xl">
+                {pageTitles[activeSection]}
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-[#77756e]">
+                {pageDescriptions[activeSection]}
+              </p>
+            </div>
+            {activeSection === 'resumen' ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => changeSection('convocatorias')}
+                  className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                >
+                  + Nueva convocatoria
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeSection('examenes')}
+                  className="min-h-11 rounded-lg border border-[#d8d2c8] bg-white px-4 font-sans text-sm font-semibold text-[#393833] hover:bg-[#f8f7f3]"
+                >
+                  Crear examen
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {activeSection !== 'resumen' ? (
+            <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#e5e1d8] bg-white p-4 md:flex-row md:items-center">
+              <label className="relative min-w-0 flex-1">
+                <span className="sr-only">
+                  Buscar en {pageTitles[activeSection].toLocaleLowerCase('es')}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#99958c]"
+                >
+                  ⌕
+                </span>
+                <input
+                  value={searchTerm}
+                  onChange={(event) => {
+                    setSearchTerm(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder={
+                    activeSection === 'usuarios'
+                      ? 'Buscar por ID de usuario...'
+                      : `Buscar ${pageTitles[activeSection].toLocaleLowerCase('es')}...`
+                  }
+                  className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-[#fdfcf9] pl-9 pr-3 text-sm"
+                />
+              </label>
+              {filterOptions[activeSection].length > 0 ? (
+                <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <span className="sr-only">Filtrar por estado</span>
+                  <select
+                    value={activeFilter}
+                    onChange={(event) => {
+                      setActiveFilter(event.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
+                  >
+                    {filterOptions[activeSection].map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {activeSection === 'suscripciones' ? (
+                <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <span className="sr-only">Filtrar por plan</span>
+                  <select
+                    value={planFilter}
+                    onChange={(event) => {
+                      setPlanFilter(event.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
+                  >
+                    <option value="">Todos los planes</option>
+                    {planes.map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {plan.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!loading && errorMessage ? (
+            <div
+              role="alert"
+              className="mb-5 flex flex-col gap-3 rounded-xl border border-[#e7c4c1] bg-[#fff5f4] px-4 py-3 text-sm text-[#8b2926] sm:flex-row sm:items-center sm:justify-between"
+            >
+              <span>{errorMessage}</span>
+              <button
+                type="button"
+                onClick={() => void loadData()}
+                className="font-semibold underline"
+              >
+                Reintentar
+              </button>
+            </div>
+          ) : null}
+          {listLoading ? (
+            <p role="status" className="mb-4 text-sm text-[#77756e]">
+              Actualizando resultados…
+            </p>
+          ) : null}
+          {loading ? (
+            <div
+              role="status"
+              className="rounded-2xl border border-[#e5e1d8] bg-white p-10 text-center text-sm text-[#77756e]"
+            >
+              Cargando panel administrativo…
+            </div>
+          ) : (
+            <>
+              {renderCurrentSection()}
+              {activeSection !== 'resumen' ? (
+                <div className="mt-5 flex flex-col gap-3 text-sm text-[#77756e] sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    {activeRowCount > 0
+                      ? `Mostrando ${(activePage - 1) * PAGE_SIZE + 1}–${Math.min(activePage * PAGE_SIZE, activeRowCount)} de ${activeRowCount}`
+                      : 'Sin registros'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={activePage <= 1}
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <span className="min-w-16 text-center">
+                      {activePage} / {activePageCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={activePage >= activePageCount}
+                      onClick={() => setCurrentPage((page) => Math.min(activePageCount, page + 1))}
+                      className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}

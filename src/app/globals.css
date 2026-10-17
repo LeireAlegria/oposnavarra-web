@@ -24,6 +24,24 @@ body {
   font-family: 'Segoe UI', Arial, sans-serif;
 }
 
+body:has(.admin-shell) > div > header,
+body:has(.admin-shell) > div > footer {
+  display: none;
+}
+
+body:has(.student-platform-shell) > div > header,
+body:has(.student-platform-shell) > div > footer {
+  display: none;
+}
+
+body:has(.admin-shell) > div > div {
+  display: contents;
+}
+
+body:has(.student-platform-shell) > div > div {
+  display: contents;
+}
+
 img {
   display: block;
   max-width: 100%;
@@ -124,7 +142,9 @@ a {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
-  font: 1rem Arial, sans-serif;
+  font:
+    1rem Arial,
+    sans-serif;
 }
 .auth-password {
   position: relative;

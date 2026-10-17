@@ -5,10 +5,12 @@ import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
 import { sendVerificationEmail } from '@/lib/auth';
+import { getSafeInternalPath } from '@/lib/navigation';
 
 export default function VerifyEmailPage() {
   const searchParams = useSearchParams();
   const initialEmail = searchParams.get('email') ?? '';
+  const next = getSafeInternalPath(searchParams.get('next'));
   const [email, setEmail] = useState(initialEmail);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState('');
@@ -25,7 +27,7 @@ export default function VerifyEmailPage() {
     setError('');
     setMessage('');
 
-    const result = await sendVerificationEmail(targetEmail);
+    const result = await sendVerificationEmail(targetEmail, next);
     setIsSubmitting(false);
 
     if (result.error) {
@@ -64,7 +66,7 @@ export default function VerifyEmailPage() {
           <button type="button" className="form-submit" onClick={handleResend} disabled={isSubmitting}>
             {isSubmitting ? 'Enviando...' : 'Reenviar correo'}
           </button>
-          <Link href="/acceder" className="secondary-button button-link">
+          <Link href={`/acceder?next=${encodeURIComponent(next)}`} className="secondary-button button-link">
             Volver a acceder
           </Link>
         </div>

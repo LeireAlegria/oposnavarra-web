@@ -5,10 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 
 import { signInWithPassword } from '@/lib/auth';
+import { getSafeInternalPath } from '@/lib/navigation';
 
 export default function AccessPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const next = getSafeInternalPath(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -31,7 +33,9 @@ export default function AccessPage() {
 
     if (result.error) {
       if (result.needsVerification) {
-        router.push(`/verificar-correo?email=${encodeURIComponent(email)}`);
+        router.push(
+          `/verificar-correo?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`,
+        );
         return;
       }
 
@@ -39,7 +43,7 @@ export default function AccessPage() {
       return;
     }
 
-    router.push('/plataforma');
+    router.push(next);
   }
 
   return (
@@ -88,7 +92,7 @@ export default function AccessPage() {
         </form>
 
         <div className="auth-links">
-          <Link href="/registro">Crear cuenta</Link>
+          <Link href={`/registro?next=${encodeURIComponent(next)}`}>Crear cuenta</Link>
           <Link href="/recuperar-contrasena">He olvidado mi contraseña</Link>
         </div>
 

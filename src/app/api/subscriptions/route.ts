@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { abandonPendingSubscription, cancelSubscriptionRenewal, getCurrentUserSubscription } from '@/lib/subscriptions';
+import { abandonPendingSubscription, getCurrentUserSubscription } from '@/lib/subscriptions';
 
 export async function GET() {
   const subscription = await getCurrentUserSubscription();
@@ -17,11 +17,10 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { action?: 'cancel' | 'abandon' };
 
     if (body.action === 'cancel') {
-      const result = await cancelSubscriptionRenewal();
-      if (!result.ok) {
-        return NextResponse.json({ message: result.error ?? 'No se pudo cancelar la renovación.' }, { status: 400 });
-      }
-      return NextResponse.json({ subscription: result.subscription }, { status: 200 });
+      return NextResponse.json(
+        { message: 'Gestiona la cancelación de renovación desde el portal de Stripe.' },
+        { status: 409 },
+      );
     }
 
     if (body.action === 'abandon') {

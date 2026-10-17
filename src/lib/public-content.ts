@@ -1,12 +1,3 @@
-export type SubscriptionPlan = {
-  code: 'mensual' | 'semestral' | 'anual';
-  name: string;
-  priceCents: number;
-  durationMonths: number;
-  description: string;
-  renewal: string;
-};
-
 export type PublicExamination = {
   id: string;
   name: string;
@@ -25,33 +16,6 @@ export const featuredExamination: PublicExamination = {
   topics: ['Administración general', 'Derecho administrativo', 'Informática', 'Navarra y servicio público'],
   availableFrom: 'MVP',
 };
-
-export const subscriptionPlans: SubscriptionPlan[] = [
-  {
-    code: 'mensual',
-    name: 'Mensual',
-    priceCents: 1500,
-    durationMonths: 1,
-    description: 'Acceso mensual para comenzar a estudiar sin compromiso.',
-    renewal: 'Automática cada mes',
-  },
-  {
-    code: 'semestral',
-    name: 'Semestral',
-    priceCents: 7900,
-    durationMonths: 6,
-    description: 'La mejor opción para una preparación más continua.',
-    renewal: 'Automática cada 6 meses',
-  },
-  {
-    code: 'anual',
-    name: 'Anual',
-    priceCents: 12000,
-    durationMonths: 12,
-    description: 'La modalidad más completa para avanzar durante todo el curso.',
-    renewal: 'Automática cada año',
-  },
-];
 
 export const homeFeatures = [
   'Test por temas con una configuración flexible.',

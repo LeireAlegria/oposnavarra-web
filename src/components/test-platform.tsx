@@ -1,27 +1,44 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 
 import {
-  QUESTION_COUNT_OPTIONS,
-  TIME_LIMIT_OPTIONS,
-  demoExam,
-  finalizeAttempt,
-  generateAttempt,
-  getExamAvailableQuestionCount,
-  updateAttemptAnswer,
-  type AttemptRecord,
-} from '@/lib/exam-engine';
-
-const STORAGE_KEY = 'oposnavarra-test-platform-v1';
+  countAvailableTestQuestions,
+  createTestAttempt,
+  finalizeTestAttempt,
+  getTestAttempt,
+  getTestCatalog,
+  getTestHistory,
+  listInProgressTestAttempts,
+  saveTestAnswer,
+  type TestAttempt,
+  type TestAttemptSummary,
+  type TestConvocation,
+} from '@/lib/test-platform-api';
 
 type TabKey = 'crear' | 'curso' | 'resultados';
+const HISTORY_PAGE_SIZE = 10;
+const QUESTION_COUNT_OPTIONS = [10, 20, 30, 40, 50];
+const TIME_LIMIT_OPTIONS = [0, 600, 1200, 1800, 2700, 3600];
+type TestPlatformProps = {
+  accountEmail: string;
+  accountPanel: ReactNode;
+  canPractice: boolean;
+};
 
 function formatSeconds(seconds: number) {
   if (!seconds || Number.isNaN(seconds)) {
     return 'Sin límite';
   }
 
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+function formatClock(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
@@ -34,88 +51,199 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-export function TestPlatform() {
-  const [activeTab, setActiveTab] = useState<TabKey>('crear');
-  const [topicIds, setTopicIds] = useState<string[]>(demoExam.topics.map((topic) => topic.id));
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPlatformProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>(() => (canPractice ? 'crear' : 'resultados'));
+  const [convocations, setConvocations] = useState<TestConvocation[]>([]);
+  const [convocationId, setConvocationId] = useState('');
+  const [topicIds, setTopicIds] = useState<string[]>([]);
   const [questionCount, setQuestionCount] = useState<number>(20);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState<number>(0);
-  const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
-  const [activeAttempt, setActiveAttempt] = useState<AttemptRecord | null>(null);
+  const [availableQuestions, setAvailableQuestions] = useState<number | null>(null);
+  const [activeTests, setActiveTests] = useState<TestAttemptSummary[]>([]);
+  const [history, setHistory] = useState<TestAttemptSummary[]>([]);
+  const [historyErrorMessage, setHistoryErrorMessage] = useState('');
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [activeAttempt, setActiveAttempt] = useState<TestAttempt | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
-  const [isReady, setIsReady] = useState(false);
-
-  const availableQuestions = useMemo(() => getExamAvailableQuestionCount(topicIds), [topicIds]);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      setIsReady(true);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(saved) as AttemptRecord[];
-      setAttempts(parsed);
-      const lastInProgress = parsed.find((entry) => entry.status === 'in_progress') ?? null;
-      if (lastInProgress) {
-        setActiveAttempt(lastInProgress);
-        setActiveTab('curso');
-      }
-    } catch {
-      setAttempts([]);
-    } finally {
-      setIsReady(true);
-    }
-  }, []);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingAttempt, setIsLoadingAttempt] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isStartingAttempt, setIsStartingAttempt] = useState(false);
+  const [isSavingAnswer, setIsSavingAnswer] = useState(false);
+  const [isFinalizingAttempt, setIsFinalizingAttempt] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isFinishConfirmationOpen, setIsFinishConfirmationOpen] = useState(false);
+  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
+  const [timeExpired, setTimeExpired] = useState(false);
+  const expiredAttemptIdRef = useRef<string | null>(null);
+  const selectedConvocation = convocations.find((convocation) => convocation.id === convocationId);
+  const availableTopics = selectedConvocation?.topics ?? [];
+  const allTopicsSelected =
+    availableTopics.length > 0 && topicIds.length === availableTopics.length;
 
   useEffect(() => {
-    if (!isReady) {
-      return;
-    }
+    let isCurrent = true;
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(attempts));
-  }, [attempts, isReady]);
-
-  useEffect(() => {
-    if (!activeAttempt || activeAttempt.status !== 'in_progress' || activeAttempt.timeLimitSeconds <= 0) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      if (!activeAttempt.expiresAt) {
-        return;
-      }
-
-      const remaining = Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt).getTime() - Date.now()) / 1000));
-
-      if (remaining <= 0) {
-        const finalAttempt = finalizeAttempt({
-          ...activeAttempt,
-          questions: activeAttempt.questions.map((question) => ({
-            ...question,
-            selectedAnswerId: question.selectedAnswerId ?? null,
-          })),
-          status: 'finalizado',
-        });
-
-        setAttempts((current) => current.map((entry) => (entry.id === finalAttempt.id ? finalAttempt : entry)));
-        setActiveAttempt(finalAttempt);
-        setActiveTab('resultados');
-        return;
-      }
-
-      setActiveAttempt((current) => {
-        if (!current) {
-          return current;
+    async function loadPlatform() {
+      setErrorMessage('');
+      setHistoryErrorMessage('');
+      setIsLoading(true);
+      try {
+        try {
+          const firstHistoryPage = await getTestHistory(HISTORY_PAGE_SIZE, 0);
+          if (!isCurrent) return;
+          setHistory(firstHistoryPage.items);
+          setHistoryHasMore(firstHistoryPage.hasMore);
+          setHistoryErrorMessage('');
+        } catch (error) {
+          if (!isCurrent) return;
+          setHistoryErrorMessage(
+            getErrorMessage(error, 'No se pudo cargar el historial. Inténtalo de nuevo.'),
+          );
+          setErrorMessage('No se pudo cargar el historial. Inténtalo de nuevo.');
         }
 
-        return { ...current, expiresAt: current.expiresAt };
-      });
-    }, 1000);
+        if (canPractice) {
+          const [catalog, inProgress] = await Promise.all([
+            getTestCatalog(),
+            listInProgressTestAttempts(),
+          ]);
+          if (!isCurrent) return;
+          setConvocations(catalog);
+          setActiveTests(inProgress);
+          if (catalog[0]) {
+            setConvocationId(catalog[0].id);
+            setTopicIds(catalog[0].topics.map((topic) => topic.id));
+          }
 
+          if (inProgress[0]) {
+            const attempt = await getTestAttempt(inProgress[0].id);
+            if (!isCurrent) return;
+            setActiveAttempt(attempt);
+            setActiveTab('curso');
+            setCurrentQuestionIndex(0);
+          }
+        }
+      } catch (error) {
+        if (isCurrent) {
+          setErrorMessage(
+            getErrorMessage(error, 'No se pudo cargar la plataforma de tests. Inténtalo de nuevo.'),
+          );
+        }
+      } finally {
+        if (isCurrent) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadPlatform();
+    return () => {
+      isCurrent = false;
+    };
+  }, [canPractice]);
+
+  useEffect(() => {
+    if (!canPractice || !convocationId) {
+      setAvailableQuestions(null);
+      return;
+    }
+
+    let isCurrent = true;
+    setAvailableQuestions(null);
+    countAvailableTestQuestions(convocationId, topicIds)
+      .then((count) => {
+        if (isCurrent) setAvailableQuestions(count);
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) {
+          setErrorMessage(
+            getErrorMessage(error, 'No se pudo consultar la disponibilidad de preguntas.'),
+          );
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [canPractice, convocationId, topicIds]);
+
+  useEffect(() => {
+    if (!activeAttempt || activeAttempt.status !== 'in_progress') {
+      return;
+    }
+
+    const updateClock = () => {
+      const now = Date.now();
+      setElapsedSeconds(
+        Math.max(0, Math.floor((now - new Date(activeAttempt.startedAt).getTime()) / 1000)),
+      );
+
+      if (
+        activeAttempt.timeLimitSeconds &&
+        activeAttempt.expiresAt &&
+        new Date(activeAttempt.expiresAt).getTime() <= now
+      ) {
+        if (expiredAttemptIdRef.current === activeAttempt.id) return;
+        expiredAttemptIdRef.current = activeAttempt.id;
+        void (async () => {
+          setIsFinalizingAttempt(true);
+          try {
+            const finalized = await finalizeTestAttempt(activeAttempt.id);
+            setActiveTests((current) =>
+              current.filter((attempt) => attempt.id !== activeAttempt.id),
+            );
+            setActiveAttempt(null);
+            setActiveTab('resultados');
+            setTimeExpired(true);
+            setHistory((current) => [
+              finalized,
+              ...current.filter((attempt) => attempt.id !== finalized.id),
+            ]);
+            setHistoryPage(0);
+            const firstHistoryPage = await getTestHistory(HISTORY_PAGE_SIZE, 0);
+            setHistory(firstHistoryPage.items);
+            setHistoryHasMore(firstHistoryPage.hasMore);
+            setHistoryPage(0);
+          } catch (error) {
+            setErrorMessage(
+              getErrorMessage(error, 'No se pudo finalizar automáticamente el test.'),
+            );
+          } finally {
+            setIsFinalizingAttempt(false);
+          }
+        })();
+      }
+    };
+
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
   }, [activeAttempt]);
+
+  async function refreshHistory(offset: number, append = false) {
+    setIsLoadingHistory(true);
+    try {
+      const nextPage = await getTestHistory(HISTORY_PAGE_SIZE, offset);
+      setHistory((current) => (append ? [...current, ...nextPage.items] : nextPage.items));
+      setHistoryHasMore(nextPage.hasMore);
+      setHistoryPage(Math.floor(offset / HISTORY_PAGE_SIZE));
+      setHistoryErrorMessage('');
+      setErrorMessage('');
+    } catch (error) {
+      const message = getErrorMessage(error, 'No se pudo actualizar el historial.');
+      setHistoryErrorMessage(message);
+      setErrorMessage(message);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
 
   const toggleTopic = (topicId: string) => {
     setTopicIds((current) => {
@@ -124,352 +252,1092 @@ export function TestPlatform() {
       }
       return [...current, topicId];
     });
+    setErrorMessage('');
   };
 
-  const handleStartAttempt = () => {
+  const handleStartAttempt = async () => {
+    if (!canPractice || !convocationId || availableQuestions === null) {
+      return;
+    }
+
     if (topicIds.length === 0) {
       setErrorMessage('Selecciona al menos un tema.');
       return;
     }
 
-    if (questionCount > availableQuestions) {
-      setErrorMessage('El número de preguntas elegido supera la cantidad disponible en los temas seleccionados.');
-      return;
-    }
-
-    const result = generateAttempt({
-      topicIds,
-      questionCount,
-      timeLimitSeconds,
-    });
-
-    if (!result.ok) {
-      setErrorMessage(result.message);
+    if (availableQuestions < 10 || questionCount > availableQuestions) {
+      setErrorMessage(
+        'El número de preguntas elegido supera la cantidad disponible en los temas seleccionados.',
+      );
       return;
     }
 
     setErrorMessage('');
-    setAttempts((current) => [result.attempt, ...current]);
-    setActiveAttempt(result.attempt);
-    setCurrentQuestionIndex(0);
-    setActiveTab('curso');
+    setIsStartingAttempt(true);
+    try {
+      const attemptId = await createTestAttempt({
+        convocationId,
+        questionCount,
+        timeLimitSeconds: timeLimitSeconds || null,
+        topicIds,
+      });
+      const attempt = await getTestAttempt(attemptId);
+      setActiveTests((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)]);
+      setActiveAttempt(attempt);
+      setCurrentQuestionIndex(0);
+      setElapsedSeconds(0);
+      setTimeExpired(false);
+      expiredAttemptIdRef.current = null;
+      setActiveTab('curso');
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'No se pudo iniciar el test.'));
+    } finally {
+      setIsStartingAttempt(false);
+    }
   };
 
-  const saveAttemptToState = (nextAttempt: AttemptRecord) => {
-    setAttempts((current) => current.map((entry) => (entry.id === nextAttempt.id ? nextAttempt : entry)));
-    setActiveAttempt(nextAttempt);
-  };
-
-  const handleAnswerSelection = (answerId: string) => {
-    if (!activeAttempt || activeAttempt.status !== 'in_progress') {
+  const handleAnswerSelection = async (answerId: string) => {
+    if (!canPractice || !activeAttempt || activeAttempt.status !== 'in_progress') {
       return;
     }
 
     const question = activeAttempt.questions[currentQuestionIndex];
-    const updatedAttempt = updateAttemptAnswer(activeAttempt, question.id, answerId);
-    saveAttemptToState(updatedAttempt);
+    setErrorMessage('');
+    setIsSavingAnswer(true);
+    try {
+      const saved = await saveTestAnswer({
+        attemptId: activeAttempt.id,
+        questionId: question.id,
+        answerId,
+      });
+      if (!saved) {
+        const finalized = await finalizeTestAttempt(activeAttempt.id);
+        setActiveTests((current) => current.filter((attempt) => attempt.id !== activeAttempt.id));
+        setActiveAttempt(null);
+        setActiveTab('resultados');
+        setTimeExpired(true);
+        setHistory((current) => [
+          finalized,
+          ...current.filter((attempt) => attempt.id !== finalized.id),
+        ]);
+        setHistoryPage(0);
+        await refreshHistory(0);
+        return;
+      }
+
+      setActiveAttempt((current) =>
+        current?.id !== activeAttempt.id
+          ? current
+          : {
+              ...current,
+              questions: current.questions.map((entry) =>
+                entry.id === question.id ? { ...entry, selectedAnswerId: answerId } : entry,
+              ),
+            },
+      );
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'No se pudo guardar tu respuesta.'));
+    } finally {
+      setIsSavingAnswer(false);
+    }
   };
 
-  const handleFinalizeAttempt = () => {
-    if (!activeAttempt || activeAttempt.status !== 'in_progress') {
+  const handleFinalizeAttempt = async () => {
+    if (!canPractice || !activeAttempt || activeAttempt.status !== 'in_progress') {
       return;
     }
 
-    const finished = finalizeAttempt({
-      ...activeAttempt,
-      questions: activeAttempt.questions.map((question) => ({
-        ...question,
-        selectedAnswerId: question.selectedAnswerId ?? null,
-      })),
-      status: 'finalizado',
-    });
+    setErrorMessage('');
+    setIsFinalizingAttempt(true);
+    try {
+      const finalized = await finalizeTestAttempt(activeAttempt.id);
+      setActiveTests((current) => current.filter((attempt) => attempt.id !== activeAttempt.id));
+      setActiveAttempt(null);
+      setIsFinishConfirmationOpen(false);
+      setActiveTab('resultados');
+      setHistory((current) => [
+        finalized,
+        ...current.filter((attempt) => attempt.id !== finalized.id),
+      ]);
+      setHistoryPage(0);
+      await refreshHistory(0);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'No se pudo finalizar el test.'));
+    } finally {
+      setIsFinalizingAttempt(false);
+    }
+  };
 
-    setAttempts((current) => current.map((entry) => (entry.id === finished.id ? finished : entry)));
-    setActiveAttempt(finished);
-    setActiveTab('resultados');
+  const handleOpenAttempt = async (attempt: TestAttemptSummary) => {
+    setIsLoadingAttempt(true);
+    setErrorMessage('');
+    try {
+      const details = await getTestAttempt(attempt.id);
+      setActiveAttempt(details);
+      setCurrentQuestionIndex(0);
+      setActiveTab('curso');
+      setIsNavigationOpen(false);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'No se pudo recuperar el test.'));
+    } finally {
+      setIsLoadingAttempt(false);
+    }
   };
 
   const currentQuestion = activeAttempt?.questions[currentQuestionIndex] ?? null;
-  const completedAttempts = attempts.filter((attempt) => attempt.status === 'finalizado');
-
+  const selectedTopicNames = activeAttempt?.selectedTopics.map((topic) => topic.name) ?? [];
+  const pageTitle =
+    activeTab === 'crear'
+      ? 'Configura tu test'
+      : activeTab === 'curso'
+        ? activeAttempt?.status === 'finalized'
+          ? 'Revisión del test'
+          : 'Test en curso'
+        : 'Historial de tests';
+  const pageDescription =
+    activeTab === 'crear'
+      ? 'Elige los temas, el número de preguntas y el tiempo para empezar.'
+      : activeTab === 'curso'
+        ? activeAttempt?.status === 'finalized'
+          ? 'Repasa tus respuestas y consulta la corrección.'
+          : 'Responde a tu ritmo y consulta tu progreso en cualquier momento.'
+        : 'Consulta los resultados de tus tests finalizados.';
+  const answeredCount =
+    activeAttempt?.questions.filter((question) => question.selectedAnswerId !== null).length ?? 0;
+  const unansweredCount = (activeAttempt?.questions.length ?? 0) - answeredCount;
   return (
-    <main className="page-shell py-10 md:py-14">
-      <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="eyebrow">Plataforma</p>
-          <h1 className="text-4xl font-normal tracking-[-0.06em] text-[var(--ink)] md:text-6xl">
-            Tu preparación
-          </h1>
+    <main className="student-platform-shell min-h-screen bg-[#f8f7f3] text-[#302f2b]">
+      <header className="flex min-h-16 items-center justify-between border-b border-[var(--line)] bg-white px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            aria-expanded={isNavigationOpen}
+            aria-controls="student-platform-navigation"
+            onClick={() => setIsNavigationOpen((open) => !open)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--line)] text-lg lg:hidden"
+          >
+            <span className="sr-only">
+              {isNavigationOpen ? 'Cerrar navegación' : 'Abrir navegación'}
+            </span>
+            {isNavigationOpen ? '×' : '☰'}
+          </button>
+          <Link href="/plataforma" className="font-serif text-xl font-semibold tracking-tight">
+            OposNavarra
+          </Link>
+          <span className="hidden border-l border-[var(--line)] pl-3 text-sm text-[var(--muted)] sm:inline">
+            Espacio de estudio
+          </span>
         </div>
-        <div className="inline-flex rounded-full border border-[var(--line)] bg-white/70 p-1">
-          {[
-            { key: 'crear', label: 'Crear test' },
-            { key: 'curso', label: 'Test en curso' },
-            { key: 'resultados', label: 'Mis resultados' },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key as TabKey)}
-              className={[
-                'rounded-full px-4 py-2 font-sans text-sm font-semibold transition-colors',
-                activeTab === tab.key ? 'bg-[var(--coral)] text-white' : 'text-[var(--muted)]',
-              ].join(' ')}
+        <details className="relative">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-sm font-medium hover:bg-[#f8f7f3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]">
+            <span
+              aria-hidden="true"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#fbefec] font-semibold text-[#bd3734]"
             >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+              {accountEmail.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="hidden max-w-48 truncate sm:inline">{accountEmail}</span>
+            <span aria-hidden="true">⌄</span>
+          </summary>
+          <div className="absolute right-0 z-30 mt-2 max-h-[75vh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-[var(--line)] bg-white p-4 shadow-xl">
+            <p className="mb-3 break-all text-sm font-semibold">{accountEmail}</p>
+            {accountPanel}
+          </div>
+        </details>
+      </header>
 
-      {activeTab === 'crear' ? (
-        <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_26px_70px_rgba(23,60,58,0.04)] md:p-8">
-            <p className="eyebrow">Convocatoria</p>
-            <h2 className="text-2xl font-normal text-[var(--ink)]">{demoExam.name}</h2>
+      <div className="grid min-h-[calc(100vh-4rem)] lg:grid-cols-[250px_minmax(0,1fr)]">
+        <aside
+          id="student-platform-navigation"
+          className={[
+            'flex flex-col border-b border-[var(--line)] bg-[#f2f1eb] p-4 lg:border-b-0 lg:border-r lg:p-6',
+            isNavigationOpen ? '' : 'hidden lg:flex',
+          ].join(' ')}
+        >
+          <div className="rounded-xl border border-[var(--line)] bg-white p-4">
+            <p className="font-sans text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+              Convocatoria
+            </p>
+            <p className="mt-2 font-sans text-sm font-semibold">
+              {selectedConvocation?.name ??
+                (canPractice ? 'Selecciona una convocatoria' : 'Solo consulta de historial')}
+            </p>
+          </div>
+          <nav aria-label="Navegación de la plataforma" className="mt-5 grid gap-1">
+            {[
+              { key: 'crear' as const, label: 'Mis tests', icon: '＋' },
+              { key: 'curso' as const, label: 'Test en curso', icon: '☷' },
+              { key: 'resultados' as const, label: 'Historial de tests', icon: '▥' },
+            ].map((item) => {
+              const isUnavailable = !canPractice && item.key !== 'resultados';
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  disabled={isUnavailable}
+                  onClick={() => {
+                    setActiveTab(item.key);
+                    setIsNavigationOpen(false);
+                  }}
+                  aria-current={activeTab === item.key ? 'page' : undefined}
+                  className={[
+                    'flex min-h-11 items-center gap-3 rounded-lg px-3 text-left font-sans text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]',
+                    activeTab === item.key
+                      ? 'bg-[#fbefec] font-semibold text-[#bd3734]'
+                      : 'text-[var(--muted)] hover:bg-white',
+                    isUnavailable ? 'cursor-not-allowed opacity-50' : '',
+                  ].join(' ')}
+                >
+                  <span aria-hidden="true" className="text-lg leading-none">
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+          {!canPractice ? (
+            <p className="mt-5 rounded-lg border border-[#e6d5ce] bg-white p-3 text-xs leading-5 text-[var(--muted)]">
+              El acceso a nuevos tests requiere una suscripción activa. Tu historial sigue
+              disponible.
+            </p>
+          ) : null}
+          <div className="mt-auto hidden pt-8 text-xs leading-5 text-[var(--muted)] lg:block">
+            <p className="font-medium text-[#302f2b]">Un test. Un paso más.</p>
+            <p className="mt-2">
+              Avanza pregunta a pregunta y revisa tu progreso cuando lo necesites.
+            </p>
+          </div>
+        </aside>
 
-            <div className="mt-6 space-y-5">
-              <div>
-                <p className="mb-3 font-sans text-sm font-semibold text-[var(--ink)]">Temas</p>
-                <div className="flex flex-wrap gap-2">
-                  {demoExam.topics.map((topic) => (
-                    <label key={topic.id} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(22,31,29,0.02)] px-3 py-2 text-sm text-[var(--ink)]">
-                      <input
-                        type="checkbox"
-                        checked={topicIds.includes(topic.id)}
-                        onChange={() => toggleTopic(topic.id)}
-                      />
-                      <span>{topic.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">Número de preguntas</span>
-                  <select
-                    value={questionCount}
-                    onChange={(event) => setQuestionCount(Number(event.target.value))}
-                    className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+        <div className="min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mb-7">
+            <p className="text-xs text-[var(--muted)]">
+              Mi espacio <span className="mx-2">/</span>
+              {activeTab === 'crear'
+                ? 'Mis tests'
+                : activeTab === 'curso'
+                  ? 'Test en curso'
+                  : 'Historial de tests'}
+            </p>
+            <h1 className="mt-3 font-serif text-3xl font-normal tracking-[-0.04em] sm:text-4xl">
+              {pageTitle}
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{pageDescription}</p>
+            {activeTab === 'curso' && activeAttempt ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
+                  Convocatoria: {activeAttempt.convocationName}
+                </span>
+                {selectedTopicNames.map((topicName) => (
+                  <span
+                    key={topicName}
+                    className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs"
                   >
-                    {QUESTION_COUNT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">Tiempo</span>
-                  <select
-                    value={timeLimitSeconds}
-                    onChange={(event) => setTimeLimitSeconds(Number(event.target.value))}
-                    className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
-                  >
-                    {TIME_LIMIT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option === 0 ? 'Sin límite' : `${Math.floor(option / 60)} minutos`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {topicName}
+                  </span>
+                ))}
+                <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
+                  {activeAttempt.questions.length} preguntas
+                </span>
+                <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
+                  {activeAttempt.timeLimitSeconds
+                    ? `Límite: ${formatSeconds(activeAttempt.timeLimitSeconds)}`
+                    : 'Sin límite de tiempo'}
+                </span>
               </div>
-            </div>
-
-            {errorMessage ? (
-              <p role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {errorMessage}
-              </p>
             ) : null}
+          </div>
 
-            <button
-              type="button"
-              onClick={handleStartAttempt}
-              className="mt-7 inline-flex w-full items-center justify-center rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#d95d4d]"
+          {errorMessage && !(activeTab === 'resultados' && historyErrorMessage) ? (
+            <p
+              role="alert"
+              className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
             >
-              Comenzar test
-            </button>
-          </div>
+              {errorMessage}
+            </p>
+          ) : null}
 
-          <div className="rounded-[2rem] border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-6 md:p-8">
-            <p className="eyebrow">Resumen</p>
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                <p className="text-sm text-[var(--muted)]">Convocatoria</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{demoExam.name}</p>
-              </div>
-              <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                <p className="text-sm text-[var(--muted)]">Número de preguntas</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{questionCount}</p>
-              </div>
-              <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                <p className="text-sm text-[var(--muted)]">Tiempo</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{timeLimitSeconds === 0 ? 'Sin límite' : formatSeconds(timeLimitSeconds)}</p>
-              </div>
-              <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                <p className="text-sm text-[var(--muted)]">Temas seleccionados</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{topicIds.length}</p>
-              </div>
-              <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                <p className="text-sm text-[var(--muted)]">Preguntas disponibles</p>
-                <p className="mt-2 text-lg font-semibold text-[var(--ink)]">{availableQuestions}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
+          {isLoading ? (
+            <p
+              className="rounded-xl border border-[var(--line)] bg-white p-5 text-sm text-[var(--muted)]"
+              role="status"
+            >
+              Cargando tu plataforma…
+            </p>
+          ) : null}
 
-      {activeTab === 'curso' ? (
-        <section className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_26px_70px_rgba(23,60,58,0.04)] md:p-8">
-          {!activeAttempt ? (
-            <div>
-              <p className="eyebrow">Sin test en curso</p>
-              <h2 className="text-2xl font-normal text-[var(--ink)]">No tienes ningún intento activo.</h2>
-              <button
-                type="button"
-                onClick={() => setActiveTab('crear')}
-                className="mt-6 inline-flex items-center justify-center rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-              >
-                Crear un test
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="eyebrow">Pregunta {currentQuestionIndex + 1} / {activeAttempt.questions.length}</p>
-                  <h2 className="text-2xl font-normal text-[var(--ink)]">{demoExam.name}</h2>
-                </div>
-                {activeAttempt.timeLimitSeconds > 0 ? (
-                  <div className="rounded-full bg-[rgba(243,111,94,0.08)] px-4 py-2 font-sans text-sm font-semibold text-[var(--coral)]">
-                    {(() => {
-                      const remaining = Math.max(0, Math.ceil((new Date(activeAttempt.expiresAt ?? Date.now()).getTime() - Date.now()) / 1000));
-                      return `Quedan ${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}`;
-                    })()}
-                  </div>
-                ) : null}
-              </div>
+          {!isLoading && activeTab === 'crear' ? (
+            <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(17rem,0.75fr)]">
+              <div className="rounded-2xl border border-[var(--line)] bg-white p-5 shadow-sm sm:p-7">
+                <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                  Configuración
+                </p>
+                <h2 className="mt-2 font-serif text-2xl font-normal">
+                  {selectedConvocation?.name ?? 'No hay convocatorias disponibles'}
+                </h2>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  Selecciona uno o varios temas para tu test.
+                </p>
 
-              {currentQuestion ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-5 md:p-6">
-                    <p className="text-lg font-semibold text-[var(--ink)]">{currentQuestion.text}</p>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {currentQuestion.options.map((option) => {
-                      const selected = currentQuestion.selectedAnswerId === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => handleAnswerSelection(option.id)}
-                          className={[
-                            'rounded-2xl border px-4 py-3 text-left font-sans text-sm transition-colors',
-                            selected
-                              ? 'border-[var(--coral)] bg-[rgba(243,111,94,0.08)] text-[var(--ink)]'
-                              : 'border-[var(--line)] bg-white text-[var(--ink)] hover:border-[var(--coral)]',
-                          ].join(' ')}
-                        >
-                          {option.text}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentQuestionIndex((index) => Math.max(0, index - 1))}
-                      disabled={currentQuestionIndex === 0}
-                      className="rounded-full border border-[var(--line)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
+                <div className="mt-6 space-y-5">
+                  <label className="block">
+                    <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                      Convocatoria
+                    </span>
+                    <select
+                      value={convocationId}
+                      onChange={(event) => {
+                        const nextConvocation = convocations.find(
+                          (convocation) => convocation.id === event.target.value,
+                        );
+                        setConvocationId(event.target.value);
+                        setTopicIds(nextConvocation?.topics.map((topic) => topic.id) ?? []);
+                      }}
+                      disabled={convocations.length === 0}
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)] disabled:opacity-60"
                     >
-                      Anterior
-                    </button>
+                      {convocations.map((convocation) => (
+                        <option key={convocation.id} value={convocation.id}>
+                          {convocation.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-                    <div className="flex gap-3">
+                  <div>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-sans text-sm font-semibold">Temas</p>
                       <button
                         type="button"
-                        onClick={() => setCurrentQuestionIndex((index) => Math.min(activeAttempt.questions.length - 1, index + 1))}
-                        className="rounded-full border border-[var(--ink)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)]"
+                        disabled={availableTopics.length === 0}
+                        onClick={() =>
+                          setTopicIds((current) =>
+                            current.length === availableTopics.length
+                              ? []
+                              : availableTopics.map((topic) => topic.id),
+                          )
+                        }
+                        className="min-h-10 rounded-md px-2 text-sm font-semibold text-[#a82f2c] underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#bd3734]"
                       >
-                        Siguiente
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleFinalizeAttempt}
-                        className="rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-                      >
-                        Finalizar test
+                        {allTopicsSelected ? 'Deseleccionar todos' : 'Seleccionar todos'}
                       </button>
                     </div>
+                    <div className="flex flex-wrap gap-2">
+                      {availableTopics.map((topic) => (
+                        <label
+                          key={topic.id}
+                          className={[
+                            'inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
+                            topicIds.includes(topic.id)
+                              ? 'border-[#bd3734] bg-[#fbefec] text-[#302f2b]'
+                              : 'border-[var(--line)] bg-white text-[var(--muted)] hover:border-[#bd3734]',
+                          ].join(' ')}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={topicIds.includes(topic.id)}
+                            onChange={() => toggleTopic(topic.id)}
+                            className="h-4 w-4 accent-[#bd3734] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]"
+                          />
+                          <span>{topic.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs text-[var(--muted)]" aria-live="polite">
+                      {availableQuestions === null
+                        ? 'Calculando disponibilidad…'
+                        : `${availableQuestions} preguntas disponibles`}{' '}
+                      para {topicIds.length}{' '}
+                      {topicIds.length === 1 ? 'tema seleccionado' : 'temas seleccionados'}.
+                    </p>
+                    {availableQuestions !== null &&
+                    availableQuestions < QUESTION_COUNT_OPTIONS[0] ? (
+                      <p role="alert" className="mt-2 text-sm text-[#a82f2c]">
+                        No hay suficientes preguntas disponibles para iniciar un test.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                        Número de preguntas
+                      </span>
+                      <select
+                        value={questionCount}
+                        onChange={(event) => setQuestionCount(Number(event.target.value))}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+                      >
+                        {QUESTION_COUNT_OPTIONS.map((option) => (
+                          <option
+                            key={option}
+                            value={option}
+                            disabled={availableQuestions === null || option > availableQuestions}
+                          >
+                            {option} preguntas
+                            {availableQuestions === null || option > availableQuestions
+                              ? ' (no disponibles)'
+                              : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                        Tiempo
+                      </span>
+                      <select
+                        value={timeLimitSeconds}
+                        onChange={(event) => setTimeLimitSeconds(Number(event.target.value))}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+                      >
+                        {TIME_LIMIT_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option === 0 ? 'Sin límite' : `${Math.floor(option / 60)} minutos`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                {errorMessage ? (
+                  <p
+                    role="alert"
+                    className="mt-5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  >
+                    {errorMessage}
+                  </p>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={handleStartAttempt}
+                  disabled={
+                    !canPractice ||
+                    isStartingAttempt ||
+                    !selectedConvocation ||
+                    availableQuestions === null ||
+                    availableQuestions < 10 ||
+                    topicIds.length === 0 ||
+                    questionCount > availableQuestions
+                  }
+                  className="mt-7 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-[#bd3734] px-5 py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#a82f2c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isStartingAttempt ? 'Creando test…' : 'Comenzar test'}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--line)] bg-[#eeede6] p-5 sm:p-7 xl:sticky xl:top-6">
+                <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                  Resumen del test
+                </p>
+                <dl className="mt-4 divide-y divide-[#deded7]">
+                  <div className="py-3">
+                    <dt className="text-xs text-[var(--muted)]">Convocatoria</dt>
+                    <dd className="mt-1 font-semibold">
+                      {selectedConvocation?.name ?? 'No disponible'}
+                    </dd>
+                  </div>
+                  <div className="py-3">
+                    <dt className="text-xs text-[var(--muted)]">Temas seleccionados</dt>
+                    <dd className="mt-1 font-medium">
+                      {topicIds.length} {topicIds.length === 1 ? 'tema' : 'temas'}
+                      {topicIds.length ? ': ' : ''}
+                      {availableTopics
+                        .filter((topic) => topicIds.includes(topic.id))
+                        .map((topic) => topic.name)
+                        .join(', ') || 'Ninguno'}
+                    </dd>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 py-3">
+                    <div>
+                      <dt className="text-xs text-[var(--muted)]">Preguntas</dt>
+                      <dd className="mt-1 font-semibold">{questionCount}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-[var(--muted)]">Tiempo</dt>
+                      <dd className="mt-1 font-semibold">
+                        {timeLimitSeconds === 0 ? 'Sin límite' : formatSeconds(timeLimitSeconds)}
+                      </dd>
+                    </div>
+                  </div>
+                  <div className="py-3">
+                    <dt className="text-xs text-[var(--muted)]">Preguntas disponibles</dt>
+                    <dd className="mt-1 font-semibold">
+                      {availableQuestions === null ? 'Calculando…' : availableQuestions}
+                    </dd>
+                  </div>
+                </dl>
+                {!canPractice ? (
+                  <p className="mt-3 rounded-lg bg-white p-3 text-sm text-[var(--muted)]">
+                    Activa una suscripción vigente para iniciar nuevos tests.
+                  </p>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {timeExpired && activeTab === 'resultados' ? (
+            <p
+              role="status"
+              className="mb-5 rounded-lg border border-[#e6d5ce] bg-white px-4 py-3 text-sm text-[#302f2b]"
+            >
+              Se agotó el tiempo y el test se finalizó automáticamente.
+            </p>
+          ) : null}
+
+          {!isLoading && activeTab === 'curso' ? (
+            <section className="rounded-2xl border border-[var(--line)] bg-white p-4 shadow-sm sm:p-6">
+              {activeTests.length > 0 ? (
+                <div className="mb-5 rounded-xl bg-[#f8f7f3] p-4">
+                  <h2 className="text-sm font-semibold">Tests en curso</h2>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {activeTests.map((attempt) => (
+                      <button
+                        key={attempt.id}
+                        type="button"
+                        onClick={() => void handleOpenAttempt(attempt)}
+                        disabled={isLoadingAttempt || activeAttempt?.id === attempt.id}
+                        className="min-h-10 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-medium disabled:cursor-default disabled:border-[#bd3734] disabled:text-[#a82f2c]"
+                      >
+                        {attempt.convocationName} · {attempt.questionCount} preguntas
+                        {activeAttempt?.id === attempt.id ? ' · Actual' : ''}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : null}
-            </>
-          )}
-        </section>
-      ) : null}
-
-      {activeTab === 'resultados' ? (
-        <section className="space-y-6">
-          {completedAttempts.length === 0 ? (
-            <div className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 md:p-8">
-              <p className="eyebrow">Sin resultados</p>
-              <h2 className="text-2xl font-normal text-[var(--ink)]">Todavía no has realizado ningún test.</h2>
-            </div>
-          ) : (
-            completedAttempts.map((attempt) => (
-              <div key={attempt.id} className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-6 shadow-[0_26px_70px_rgba(23,60,58,0.04)] md:p-8">
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="eyebrow">Resultado</p>
-                    <h2 className="text-2xl font-normal text-[var(--ink)]">{attempt.resultado?.nota ?? 0} / 10</h2>
-                    <p className="mt-2 text-sm text-[var(--muted)]">{formatDate(attempt.startedAt)}</p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveAttempt(attempt);
-                        setActiveTab('curso');
-                      }}
-                      className="rounded-full border border-[var(--ink)] px-5 py-3 font-sans text-sm font-semibold text-[var(--ink)]"
-                    >
-                      Revisar test
-                    </button>
+              {!activeAttempt ? (
+                <div>
+                  {activeTests.length > 0 ? (
+                    <>
+                      <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                        Elige un test
+                      </p>
+                      <h2 className="mt-2 font-serif text-2xl font-normal">
+                        Selecciona uno de tus tests en curso para continuar.
+                      </h2>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                        Sin test en curso
+                      </p>
+                      <h2 className="mt-2 font-serif text-2xl font-normal">
+                        No tienes ningún intento activo.
+                      </h2>
+                    </>
+                  )}
+                  {canPractice ? (
                     <button
                       type="button"
                       onClick={() => setActiveTab('crear')}
-                      className="rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+                      className="mt-6 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#bd3734] px-5 py-3 font-sans text-sm font-semibold text-white"
                     >
-                      Crear otro test
+                      Crear un test
                     </button>
-                  </div>
+                  ) : null}
                 </div>
+              ) : !canPractice && activeAttempt.status === 'in_progress' ? (
+                <div className="max-w-2xl p-2 sm:p-4">
+                  <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                    Test en curso bloqueado
+                  </p>
+                  <h2 className="mt-2 font-serif text-2xl font-normal">
+                    Tu acceso no permite continuar este test.
+                  </h2>
+                  <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+                    Activa una suscripción vigente para recuperar intentos en curso o revisar
+                    preguntas. Los resultados anteriores siguen disponibles en el historial.
+                  </p>
+                  <Link
+                    href="/planes"
+                    className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#bd3734] px-5 py-3 font-sans text-sm font-semibold text-white"
+                  >
+                    Ver planes
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
+                    <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
+                      <div className="p-5 sm:p-7">
+                        {currentQuestion ? (
+                          <div className="space-y-6">
+                            <p className="font-sans text-sm font-bold text-[#bd3734]">
+                              PREGUNTA {String(currentQuestionIndex + 1).padStart(2, '0')}{' '}
+                              <span className="ml-2 font-normal text-[var(--muted)]">
+                                / {activeAttempt.questions.length}
+                              </span>
+                            </p>
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-4">
-                    <p className="text-sm text-[var(--muted)]">Aciertos</p>
-                    <p className="mt-2 text-xl font-semibold text-[var(--ink)]">{attempt.resultado?.aciertos ?? 0}</p>
+                            <div>
+                              <p className="text-sm text-[var(--muted)]">
+                                {currentQuestion.topics.map((topic) => topic.name).join(', ') ||
+                                  'Pregunta'}
+                              </p>
+                              <h3 className="mt-3 text-xl font-semibold leading-relaxed text-[#302f2b] sm:text-2xl">
+                                {currentQuestion.text}
+                              </h3>
+                            </div>
+
+                            <fieldset className="grid gap-3">
+                              <legend className="sr-only">
+                                {activeAttempt.status === 'finalized'
+                                  ? 'Respuestas y corrección'
+                                  : 'Selecciona una respuesta'}
+                              </legend>
+                              {currentQuestion.options.map((option, optionIndex) => {
+                                const selected = currentQuestion.selectedAnswerId === option.id;
+                                const showCorrection = activeAttempt.status === 'finalized';
+                                const isCorrectAnswer = showCorrection && option.isCorrect === true;
+                                const isSelectedIncorrect =
+                                  showCorrection && selected && option.isCorrect === false;
+                                return (
+                                  <button
+                                    key={option.id}
+                                    type="button"
+                                    aria-pressed={selected}
+                                    disabled={
+                                      !canPractice ||
+                                      showCorrection ||
+                                      isSavingAnswer ||
+                                      isFinalizingAttempt
+                                    }
+                                    onClick={() => handleAnswerSelection(option.id)}
+                                    className={[
+                                      'flex min-h-[68px] items-center gap-4 rounded-lg border px-4 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734] disabled:cursor-default sm:px-5',
+                                      isCorrectAnswer
+                                        ? 'border-2 border-emerald-700 bg-emerald-50 text-[#302f2b]'
+                                        : isSelectedIncorrect
+                                          ? 'border-2 border-[#bd3734] bg-[#fbefec] text-[#302f2b]'
+                                          : selected
+                                            ? 'border-2 border-[#c43b38] bg-[#fbefec] text-[#302f2b]'
+                                            : 'border-[var(--line)] bg-white text-[#302f2b] hover:border-[#c43b38]',
+                                    ].join(' ')}
+                                  >
+                                    <span
+                                      className={[
+                                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-sans text-sm font-semibold',
+                                        isCorrectAnswer
+                                          ? 'bg-emerald-700 text-white'
+                                          : selected
+                                            ? 'bg-[#bd3734] text-white'
+                                            : 'bg-[#f6f5f0] text-[var(--muted)]',
+                                      ].join(' ')}
+                                    >
+                                      {String.fromCharCode(65 + optionIndex)}
+                                    </span>
+                                    <span className="flex-1 text-sm leading-6 sm:text-base">
+                                      {option.text}
+                                    </span>
+                                    {showCorrection && isCorrectAnswer ? (
+                                      <span className="text-xs font-semibold text-emerald-800">
+                                        Correcta
+                                      </span>
+                                    ) : null}
+                                    {showCorrection && isSelectedIncorrect ? (
+                                      <span className="text-xs font-semibold text-[#a82f2c]">
+                                        Tu respuesta
+                                      </span>
+                                    ) : null}
+                                    <span
+                                      aria-hidden="true"
+                                      className={[
+                                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
+                                        isCorrectAnswer
+                                          ? 'border-emerald-700'
+                                          : selected
+                                            ? 'border-[#bd3734]'
+                                            : 'border-[#deded7]',
+                                      ].join(' ')}
+                                    >
+                                      {selected || isCorrectAnswer ? (
+                                        <span
+                                          className={[
+                                            'h-2.5 w-2.5 rounded-full',
+                                            isCorrectAnswer ? 'bg-emerald-700' : 'bg-[#bd3734]',
+                                          ].join(' ')}
+                                        />
+                                      ) : null}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </fieldset>
+
+                            <p className="text-sm text-[var(--muted)]" aria-live="polite">
+                              {isSavingAnswer
+                                ? 'Guardando respuesta…'
+                                : currentQuestion.selectedAnswerId
+                                  ? activeAttempt.status === 'finalized'
+                                    ? currentQuestion.status === 'correcta'
+                                      ? 'Respuesta correcta.'
+                                      : 'Respuesta incorrecta.'
+                                    : '✓ Respuesta guardada'
+                                  : 'Selecciona una respuesta o déjala en blanco.'}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="border-t border-[var(--line)] p-5 sm:px-7 sm:py-6">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCurrentQuestionIndex((index) => Math.max(0, index - 1))
+                            }
+                            disabled={currentQuestionIndex === 0}
+                            className="min-h-12 rounded-lg border border-[var(--line)] px-5 font-sans text-sm font-semibold text-[#302f2b] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            ← Anterior
+                          </button>
+                          {currentQuestionIndex < activeAttempt.questions.length - 1 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCurrentQuestionIndex((index) =>
+                                  Math.min(activeAttempt.questions.length - 1, index + 1),
+                                )
+                              }
+                              className="min-h-12 rounded-lg bg-[#bd3734] px-5 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                            >
+                              Siguiente pregunta →
+                            </button>
+                          ) : activeAttempt.status === 'finalized' ? (
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('resultados')}
+                              className="min-h-12 rounded-lg bg-[#bd3734] px-5 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                            >
+                              Volver al historial
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setIsFinishConfirmationOpen(true)}
+                              className="min-h-12 rounded-lg bg-[#bd3734] px-5 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                            >
+                              Finalizar test
+                            </button>
+                          )}
+                        </div>
+                        <p className="mt-5 text-xs text-[var(--muted)]">
+                          {activeAttempt.status === 'in_progress'
+                            ? 'Verás tus resultados al finalizar el test.'
+                            : 'La corrección se muestra después de finalizar el test.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <aside className="grid gap-4">
+                      <section
+                        className="rounded-2xl bg-[#eeede6] p-5"
+                        aria-label="Tiempo de sesión"
+                      >
+                        <p className="text-sm text-[var(--muted)]">
+                          ◷ <span className="ml-2">Tiempo de sesión</span>
+                        </p>
+                        <div className="mt-4 flex items-end justify-between gap-2">
+                          <p className="font-serif text-3xl text-[#302f2b]">
+                            {activeAttempt.timeLimitSeconds !== null && activeAttempt.expiresAt
+                              ? formatClock(
+                                  Math.max(
+                                    0,
+                                    Math.ceil(
+                                      (new Date(activeAttempt.expiresAt).getTime() - Date.now()) /
+                                        1000,
+                                    ),
+                                  ),
+                                )
+                              : formatClock(elapsedSeconds)}
+                          </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {activeAttempt.timeLimitSeconds !== null
+                              ? 'Tiempo restante'
+                              : 'Tiempo transcurrido'}
+                          </p>
+                        </div>
+                      </section>
+
+                      <section className="rounded-2xl border border-[var(--line)] bg-white p-5">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="font-sans text-sm font-semibold text-[#302f2b]">
+                            Tu progreso
+                          </h3>
+                          <span className="text-sm font-semibold text-[#bd3734]">
+                            {Math.round((answeredCount / activeAttempt.questions.length) * 100)} %
+                          </span>
+                        </div>
+                        <div
+                          className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#eeede6]"
+                          role="progressbar"
+                          aria-label="Progreso del test"
+                          aria-valuemin={0}
+                          aria-valuemax={activeAttempt.questions.length}
+                          aria-valuenow={answeredCount}
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#bd3734]"
+                            style={{
+                              width: `${(answeredCount / activeAttempt.questions.length) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="mt-3 text-xs text-[var(--muted)]">
+                          {answeredCount} de {activeAttempt.questions.length} respondidas ·{' '}
+                          {unansweredCount} pendientes
+                        </p>
+
+                        <div className="my-5 border-t border-[var(--line)]" />
+                        <p className="mb-3 text-sm font-medium text-[#302f2b]">Ir a la pregunta</p>
+                        <div className="grid grid-cols-5 gap-2">
+                          {activeAttempt.questions.map((question, index) => {
+                            const isCurrent = index === currentQuestionIndex;
+                            const hasAnswer = Boolean(question.selectedAnswerId);
+                            return (
+                              <button
+                                key={question.id}
+                                type="button"
+                                onClick={() => setCurrentQuestionIndex(index)}
+                                aria-current={isCurrent ? 'step' : undefined}
+                                aria-label={`Ir a la pregunta ${index + 1}, ${hasAnswer ? 'respondida' : 'pendiente'}${isCurrent ? ', actual' : ''}`}
+                                className={[
+                                  'relative aspect-square rounded-md border font-sans text-sm font-medium transition-colors',
+                                  isCurrent
+                                    ? 'border-[#bd3734] bg-[#bd3734] text-white'
+                                    : hasAnswer
+                                      ? 'border-transparent bg-[#eeede6] text-[#302f2b] hover:border-[#bd3734]'
+                                      : 'border-[var(--line)] bg-white text-[var(--muted)] hover:border-[#bd3734]',
+                                ].join(' ')}
+                              >
+                                <span>{String(index + 1).padStart(2, '0')}</span>
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute -right-0.5 -top-1 text-[10px]"
+                                >
+                                  {isCurrent ? '●' : hasAnswer ? '✓' : '–'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="my-5 border-t border-[var(--line)]" />
+                        {activeAttempt.status === 'in_progress' ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setIsFinishConfirmationOpen(true)}
+                              disabled={isSavingAnswer || isFinalizingAttempt}
+                              className="min-h-12 w-full rounded-lg border border-[var(--line)] px-4 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
+                            >
+                              {isFinalizingAttempt ? 'Finalizando…' : 'Finalizar y ver resultados'}
+                            </button>
+                            <p className="mt-3 text-center text-xs leading-5 text-[var(--muted)]">
+                              {unansweredCount > 0
+                                ? `Tienes ${unansweredCount} preguntas sin responder.`
+                                : 'Has respondido todas las preguntas.'}
+                            </p>
+                          </>
+                        ) : null}
+                      </section>
+                    </aside>
                   </div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-4">
-                    <p className="text-sm text-[var(--muted)]">Fallos</p>
-                    <p className="mt-2 text-xl font-semibold text-[var(--ink)]">{attempt.resultado?.fallos ?? 0}</p>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-4">
-                    <p className="text-sm text-[var(--muted)]">En blanco</p>
-                    <p className="mt-2 text-xl font-semibold text-[var(--ink)]">{attempt.resultado?.enBlanco ?? 0}</p>
-                  </div>
+                  {isFinishConfirmationOpen ? (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                      <section
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="finish-test-title"
+                        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+                      >
+                        <h2 id="finish-test-title" className="text-xl font-semibold text-[#302f2b]">
+                          ¿Finalizar el test?
+                        </h2>
+                        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+                          {unansweredCount > 0
+                            ? `Tienes ${unansweredCount} ${unansweredCount === 1 ? 'pregunta sin responder' : 'preguntas sin responder'}. ¿Quieres entregar el test ahora?`
+                            : 'Has respondido todas las preguntas. ¿Quieres entregar el test ahora?'}
+                        </p>
+                        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setIsFinishConfirmationOpen(false)}
+                            className="min-h-11 rounded-lg border border-[var(--line)] px-4 font-sans text-sm font-semibold text-[#302f2b]"
+                          >
+                            Seguir practicando
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleFinalizeAttempt}
+                            disabled={isFinalizingAttempt || isSavingAnswer}
+                            className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white"
+                          >
+                            {isFinalizingAttempt ? 'Finalizando…' : 'Confirmar y finalizar'}
+                          </button>
+                        </div>
+                      </section>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </section>
+          ) : null}
+
+          {!isLoading && activeTab === 'resultados' ? (
+            <section className="space-y-6">
+              {history.length === 0 && historyErrorMessage ? (
+                <div
+                  role="alert"
+                  className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 sm:p-8"
+                >
+                  <p>{historyErrorMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => void refreshHistory(0)}
+                    disabled={isLoadingHistory}
+                    className="mt-4 min-h-10 rounded-lg border border-red-300 bg-white px-4 font-semibold disabled:opacity-50"
+                  >
+                    {isLoadingHistory ? 'Cargando…' : 'Reintentar'}
+                  </button>
                 </div>
-              </div>
-            ))
-          )}
-        </section>
-      ) : null}
+              ) : history.length === 0 ? (
+                <div className="rounded-2xl border border-[var(--line)] bg-white p-6 sm:p-8">
+                  <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                    Historial vacío
+                  </p>
+                  <h2 className="mt-2 font-serif text-2xl font-normal">
+                    Todavía no has realizado ningún test.
+                  </h2>
+                  {canPractice ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('crear')}
+                      className="mt-5 min-h-11 rounded-lg bg-[#bd3734] px-5 py-3 font-sans text-sm font-semibold text-white"
+                    >
+                      Configurar un test
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                history.map((attempt) => (
+                  <article
+                    key={attempt.id}
+                    className="rounded-2xl border border-[var(--line)] bg-white p-5 shadow-sm sm:p-7"
+                  >
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                          Resultado · {formatDate(attempt.startedAt)}
+                        </p>
+                        <h2 className="mt-2 font-serif text-3xl font-normal">
+                          {attempt.result?.porcentajeAciertos ?? 0} %
+                        </h2>
+                        <p className="mt-1 text-sm text-[var(--muted)]">
+                          Nota {attempt.result?.nota ?? 0} / 10 · {attempt.questionCount} preguntas
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3">
+                        {canPractice ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenAttempt(attempt)}
+                            disabled={isLoadingAttempt}
+                            className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
+                          >
+                            {isLoadingAttempt ? 'Cargando…' : 'Revisar test'}
+                          </button>
+                        ) : null}
+                        {canPractice ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('crear')}
+                            className="min-h-11 rounded-lg bg-[#bd3734] px-4 py-2 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                          >
+                            Crear otro test
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-xl bg-[#f8f7f3] p-4">
+                        <p className="text-xs text-[var(--muted)]">Preguntas</p>
+                        <p className="mt-2 text-lg font-semibold">{attempt.questionCount}</p>
+                      </div>
+                      <div className="rounded-xl bg-[#f8f7f3] p-4">
+                        <p className="text-xs text-[var(--muted)]">Aciertos</p>
+                        <p className="mt-2 text-lg font-semibold">
+                          {attempt.result?.aciertos ?? 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl bg-[#f8f7f3] p-4">
+                        <p className="text-xs text-[var(--muted)]">Fallos</p>
+                        <p className="mt-2 text-lg font-semibold">{attempt.result?.fallos ?? 0}</p>
+                      </div>
+                      <div className="rounded-xl bg-[#f8f7f3] p-4">
+                        <p className="text-xs text-[var(--muted)]">En blanco</p>
+                        <p className="mt-2 text-lg font-semibold">
+                          {attempt.result?.enBlanco ?? 0}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[var(--muted)]">
+                      <p>
+                        <span className="font-medium text-[#302f2b]">Temas: </span>
+                        {attempt.selectedTopics.map((topic) => topic.name).join(', ')}
+                      </p>
+                      <p>
+                        <span className="font-medium text-[#302f2b]">Convocatoria: </span>
+                        {attempt.convocationName}
+                      </p>
+                      <p>
+                        <span className="font-medium text-[#302f2b]">Tiempo: </span>
+                        {formatClock(attempt.result?.tiempoEmpleadoSegundos ?? 0)}
+                      </p>
+                    </div>
+                    {attempt.result?.byTopic.length ? (
+                      <div className="mt-5 border-t border-[var(--line)] pt-4">
+                        <h3 className="text-sm font-semibold">Resultados por tema</h3>
+                        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {attempt.result.byTopic.map((topic) => (
+                            <li
+                              key={topic.topicId}
+                              className="flex items-center justify-between gap-3 rounded-lg bg-[#f8f7f3] px-3 py-2 text-sm"
+                            >
+                              <span>{topic.topicName}</span>
+                              <span className="shrink-0 font-medium">
+                                {topic.porcentajeAciertos} % · {topic.questionCount} preguntas
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </article>
+                ))
+              )}
+              {historyHasMore ? (
+                <div className="flex flex-wrap justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void refreshHistory((historyPage + 1) * HISTORY_PAGE_SIZE, true)}
+                    disabled={isLoadingHistory}
+                    className="min-h-11 rounded-lg border border-[var(--line)] bg-white px-4 text-sm font-semibold disabled:opacity-50"
+                  >
+                    {isLoadingHistory ? 'Cargando…' : 'Ver más tests'}
+                  </button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
+      </div>
     </main>
   );
 }
