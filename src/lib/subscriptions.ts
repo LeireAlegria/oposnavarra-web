@@ -106,7 +106,9 @@ export async function getCurrentUserSubscription(): Promise<SubscriptionRecord |
   }
 }
 
-export async function startPendingSubscription(planId: string): Promise<{ ok: boolean; subscription?: SubscriptionRecord; error?: string }> {
+export async function startPendingSubscription(
+  planId: string,
+): Promise<{ ok: boolean; subscription?: SubscriptionRecord; error?: string }> {
   if (!hasSupabaseConfig()) {
     return { ok: false, error: 'La contratación todavía no está disponible.' };
   }
@@ -138,7 +140,11 @@ export async function startPendingSubscription(planId: string): Promise<{ ok: bo
   }
 }
 
-export async function abandonPendingSubscription(): Promise<{ ok: boolean; error?: string; subscription?: SubscriptionRecord }> {
+export async function abandonPendingSubscription(): Promise<{
+  ok: boolean;
+  error?: string;
+  subscription?: SubscriptionRecord;
+}> {
   if (!hasSupabaseConfig()) {
     return { ok: false, error: 'No hay una contratación pendiente para abandonar.' };
   }
@@ -173,7 +179,7 @@ export async function hasActiveSubscriptionAccess(): Promise<boolean> {
       return false;
     }
 
-    const { data, error } = await supabase.rpc('comprobar_acceso_suscripcion', {
+    const { data, error } = await supabase.rpc('tiene_suscripcion_activa', {
       p_usuario_id: user.id,
     });
 

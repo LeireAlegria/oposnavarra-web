@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { TestPlatform } from '@/components/test-platform';
+import { isAdminProfile } from '@/lib/admin-access';
 import { createClient } from '@/lib/supabase/server';
 import { AbandonPendingSubscriptionButton } from '@/components/abandon-pending-subscription-button';
 import { StripePortalButton } from '@/components/stripe-portal-button';
@@ -42,6 +43,17 @@ export default async function PlatformPage() {
       p_usuario_id: user.id,
     },
   );
+  const { data: hasSubscription, error: subscriptionAccessError } = await supabase.rpc(
+    'tiene_suscripcion_activa',
+    {
+      p_usuario_id: user.id,
+    },
+  );
+  const { data: profile, error: profileError } = await supabase
+    .from('perfiles')
+    .select('rol')
+    .eq('id', user.id)
+    .maybeSingle();
   const subscriptionRecord = subscription as
     | (Record<string, unknown> & {
         id: string;
@@ -75,11 +87,13 @@ export default async function PlatformPage() {
       : { data: null };
 
   const statusText =
-    subscriptionError || accessError
+    subscriptionError || accessError || subscriptionAccessError || profileError
       ? 'No se pudo cargar tu suscripción.'
       : (subscriptionRecord?.estado ?? 'sin suscripción');
 
   const hasActiveAccess = Boolean(hasAccess);
+  const hasActiveSubscription = Boolean(hasSubscription);
+  const isAdmin = isAdminProfile(profile);
   const canAbandonPending =
     subscriptionRecord?.estado === 'pendiente' &&
     !subscriptionRecord.stripe_subscription_id &&
@@ -99,7 +113,7 @@ export default async function PlatformPage() {
     subscriptionRecord.periodo_fin &&
     new Date(subscriptionRecord.periodo_fin).getTime() > Date.now()
       ? 'Acceso suspendido tras un reembolso'
-      : subscriptionRecord?.estado === 'activa' && !hasActiveAccess
+      : subscriptionRecord?.estado === 'activa' && !hasActiveSubscription
         ? 'Periodo pagado finalizado'
         : subscriptionRecord?.estado === 'activa' &&
             subscriptionRecord.cancelar_al_final_del_periodo
@@ -120,11 +134,17 @@ export default async function PlatformPage() {
           Estado de acceso
         </p>
         <p className="mt-2 text-lg font-semibold text-[var(--ink)]">
-          {hasActiveAccess ? 'Acceso activo' : 'Acceso no disponible'}
+          {hasActiveAccess
+            ? isAdmin && !hasActiveSubscription
+              ? 'Acceso de administrador'
+              : 'Acceso activo'
+            : 'Acceso no disponible'}
         </p>
         <p className="mt-2 leading-5 text-[var(--muted)]">
           {hasActiveAccess
-            ? 'Tu suscripción vigente habilita el acceso a las convocatorias disponibles.'
+            ? isAdmin && !hasActiveSubscription
+              ? 'Tu cuenta de administrador permite acceder a los tests sin una suscripción activa.'
+              : 'Tu suscripción vigente habilita el acceso a las convocatorias disponibles.'
             : 'Sin una suscripción activa no se pueden crear ni continuar tests.'}
         </p>
       </section>

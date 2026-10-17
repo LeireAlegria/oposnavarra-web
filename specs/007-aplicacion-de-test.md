@@ -8,7 +8,7 @@
 
 ## 1. Objetivo
 
-Implementar la plataforma de realización de test de OposNavarra, permitiendo a los usuarios autenticados y con una suscripción activa practicar preguntas tipo test de las convocatorias a las que tienen acceso.
+Implementar la plataforma de realización de test de OposNavarra, permitiendo a los usuarios autenticados con una suscripción activa, y a las cuentas administradoras autorizadas, practicar preguntas tipo test de las convocatorias a las que tienen acceso.
 
 En este MVP, los usuarios podrán:
 
@@ -110,22 +110,23 @@ Comportamiento:
 3. La plataforma comprobará si tiene una suscripción activa.
 4. Si tiene una suscripción activa, podrá acceder a las funcionalidades de test.
 5. Si no tiene una suscripción activa, podrá consultar sus resultados históricos y acceder a los planes disponibles.
+6. Las cuentas con `perfiles.rol = 'admin'`, autenticadas y con el correo verificado, podrán acceder a todas las funcionalidades de test sin una suscripción activa. Esta excepción no activa ni simula una suscripción.
 
 ### 4.2. Control de suscripción
 
 Para iniciar o continuar un test será obligatorio:
 
 - Tener una sesión autenticada válida.
-- Tener una suscripción activa y vigente.
+- Tener una suscripción activa y vigente, salvo las cuentas administradoras autorizadas.
 - Cumplir las condiciones de acceso definidas en la spec 006.
 
-La comprobación se realizará en el backend.
+La comprobación se realizará en el backend. La excepción de administración se basará en el rol actual de `public.perfiles`, nunca en datos enviados por el navegador. Los administradores podrán crear, continuar, finalizar y revisar tests conforme a las mismas reglas de contenido publicable; esta excepción no modifica el estado ni los permisos de facturación de su suscripción.
 
 No será suficiente con ocultar funcionalidades desde el frontend.
 
 ### 4.3. Suscripción caducada
 
-Cuando la suscripción deje de estar activa:
+Cuando la suscripción deje de estar activa para una cuenta que no sea administradora:
 
 - No se podrán iniciar nuevos test.
 - No se podrán continuar test pendientes.
@@ -139,7 +140,7 @@ Los resultados históricos permanecerán almacenados.
 
 La lógica de autorización deberá estar centralizada y desacoplada del motor de test.
 
-En el MVP únicamente se permitirá el acceso mediante suscripción activa.
+En el MVP se permitirá el acceso mediante suscripción activa o mediante el rol de administrador autorizado, sin que este último conceda acceso de pago ni modifique las reglas de facturación.
 
 En el futuro podrán incorporarse modalidades gratuitas sin modificar la lógica principal de generación, realización y corrección.
 
@@ -474,7 +475,7 @@ Se mostrarán:
 
 ## 11. Revisión del test
 
-El usuario podrá revisar los test finalizados mientras tenga una suscripción activa.
+El usuario podrá revisar los test finalizados mientras tenga una suscripción activa. Las cuentas administradoras autorizadas podrán hacerlo aunque no tengan una suscripción activa.
 
 Se mostrará una pregunta cada vez.
 
@@ -523,7 +524,7 @@ Al seleccionar un test, se abrirá su pantalla de resultados.
 
 El historial seguirá disponible aunque la suscripción haya caducado.
 
-La revisión completa de preguntas requerirá una suscripción activa.
+La revisión completa de preguntas requerirá una suscripción activa, salvo para las cuentas administradoras autorizadas.
 
 ### 12.3. Paginación
 
@@ -816,7 +817,8 @@ Se implementarán pruebas automatizadas de las reglas de negocio principales.
 
 - [ ] El botón «Acceder» permite entrar en la plataforma.
 - [ ] La plataforma requiere autenticación.
-- [ ] Solo los usuarios con suscripción activa pueden iniciar test.
+- [ ] Los usuarios con suscripción activa y las cuentas administradoras autorizadas pueden iniciar test.
+- [ ] La falta de suscripción no limita el acceso de las cuentas administradoras a las funcionalidades de test.
 - [ ] Un usuario sin suscripción puede consultar sus resultados históricos.
 
 ### Configuración
