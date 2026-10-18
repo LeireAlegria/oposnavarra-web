@@ -19,11 +19,29 @@ type Convocatoria = {
   id: string;
   nombre: string;
   descripcion?: string | null;
+  organismo_convocante?: string | null;
+  ambito?: string | null;
+  categoria?: string | null;
+  grupo?: string | null;
+  fuente_oficial_url?: string | null;
+  informacion_url?: string | null;
   activo?: boolean;
   created_at?: string;
   updated_at?: string;
   convocatoria_tema?: Array<{ count: number }>;
   convocatoria_examen?: Array<{ count: number }>;
+};
+
+type ConvocatoriaTema = {
+  convocatoria_id: string;
+  tema_id: string;
+  numero: number;
+  orden: number;
+};
+
+type ConvocatoriaExamen = {
+  convocatoria_id: string;
+  examen_id: string;
 };
 
 type Tema = {
@@ -37,7 +55,10 @@ type Tema = {
 type Examen = {
   id: string;
   nombre: string;
+  fecha?: string | null;
   descripcion?: string | null;
+  url_examen?: string | null;
+  url_plantilla_respuestas?: string | null;
   es_oficial?: boolean;
   created_at?: string;
 };
@@ -52,12 +73,16 @@ type Respuesta = {
 type Pregunta = {
   id: string;
   enunciado: string;
+  numero?: number | null;
+  explicacion?: string | null;
+  fuente_url?: string | null;
   estado?: string;
   origen?: string;
   situacion?: string;
   examen_id?: string | null;
   created_at?: string;
   respuestas?: Respuesta[];
+  pregunta_tema?: Array<{ tema_id: string }>;
 };
 
 type Perfil = {
@@ -71,9 +96,11 @@ type Plan = {
   id: string;
   codigo: string;
   nombre: string;
+  moneda?: string;
   activo?: boolean;
   precio_centimos?: number;
   duracion_meses?: number;
+  orden?: number;
 };
 
 type Suscripcion = {
@@ -91,6 +118,9 @@ type Suscripcion = {
 
 type QuestionForm = {
   enunciado: string;
+  numero: string;
+  explicacion: string;
+  fuente_url: string;
   estado: 'revision' | 'publicada' | 'desactivada';
   origen: 'propia' | 'oficial';
   situacion: 'ordinaria' | 'reserva' | 'anulada';
@@ -101,6 +131,9 @@ type QuestionForm = {
 
 const emptyQuestionForm: QuestionForm = {
   enunciado: '',
+  numero: '',
+  explicacion: '',
+  fuente_url: '',
   estado: 'revision',
   origen: 'propia',
   situacion: 'ordinaria',
@@ -150,6 +183,11 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [convocatorias, setConvocatorias] = useState<Convocatoria[]>([]);
+  const [convocatoriaTemas, setConvocatoriaTemas] = useState<ConvocatoriaTema[]>([]);
+  const [convocatoriaExamenes, setConvocatoriaExamenes] = useState<ConvocatoriaExamen[]>([]);
+  const [managedConvocatoriaId, setManagedConvocatoriaId] = useState<string | null>(null);
+  const [managedTopicRelations, setManagedTopicRelations] = useState<ConvocatoriaTema[]>([]);
+  const [managedExamIds, setManagedExamIds] = useState<string[]>([]);
   const [temas, setTemas] = useState<Tema[]>([]);
   const [examenes, setExamenes] = useState<Examen[]>([]);
   const [preguntas, setPreguntas] = useState<Pregunta[]>([]);
@@ -169,6 +207,14 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const [remoteCounts, setRemoteCounts] = useState({ preguntas: 0, usuarios: 0, suscripciones: 0 });
   const [errorMessage, setErrorMessage] = useState('');
   const [questionForm, setQuestionForm] = useState<QuestionForm>(emptyQuestionForm);
+  const [editingConvocatoriaId, setEditingConvocatoriaId] = useState<string | null>(null);
+  const [editingTemaId, setEditingTemaId] = useState<string | null>(null);
+  const [topicConvocatoriaId, setTopicConvocatoriaId] = useState('');
+  const [topicNumero, setTopicNumero] = useState('1');
+  const [topicOrden, setTopicOrden] = useState('1');
+  const [editingExamenId, setEditingExamenId] = useState<string | null>(null);
+  const [editingPreguntaId, setEditingPreguntaId] = useState<string | null>(null);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
 
   const supabase = useMemo(() => createClient(), []);
 
@@ -180,6 +226,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       const now = new Date().toISOString();
       const [
         convocatoriasResult,
+        convocatoriaTemasResult,
+        convocatoriaExamenesResult,
         temasResult,
         examenesResult,
         preguntasResult,
@@ -197,11 +245,13 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           .from('convocatorias')
           .select('*, convocatoria_tema(count), convocatoria_examen(count)')
           .order('created_at', { ascending: false }),
+        supabase.from('convocatoria_tema').select('convocatoria_id, tema_id, numero, orden'),
+        supabase.from('convocatoria_examen').select('convocatoria_id, examen_id'),
         supabase.from('temas').select('*').order('created_at', { ascending: false }),
         supabase.from('examenes').select('*').order('created_at', { ascending: false }),
         supabase
           .from('preguntas')
-          .select('*, respuestas(*)', { count: 'exact' })
+          .select('*, respuestas(*), pregunta_tema(tema_id)', { count: 'exact' })
           .order('created_at', { ascending: false })
           .range(0, PAGE_SIZE - 1),
         supabase
@@ -229,6 +279,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       ]);
 
       if (convocatoriasResult.error) throw convocatoriasResult.error;
+      if (convocatoriaTemasResult.error) throw convocatoriaTemasResult.error;
+      if (convocatoriaExamenesResult.error) throw convocatoriaExamenesResult.error;
       if (temasResult.error) throw temasResult.error;
       if (examenesResult.error) throw examenesResult.error;
       if (preguntasResult.error) throw preguntasResult.error;
@@ -247,6 +299,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       if (countError) throw countError;
 
       setConvocatorias((convocatoriasResult.data ?? []) as Convocatoria[]);
+      setConvocatoriaTemas((convocatoriaTemasResult.data ?? []) as ConvocatoriaTema[]);
+      setConvocatoriaExamenes((convocatoriaExamenesResult.data ?? []) as ConvocatoriaExamen[]);
       setTemas((temasResult.data ?? []) as Tema[]);
       setExamenes((examenesResult.data ?? []) as Examen[]);
       setPreguntas((preguntasResult.data ?? []) as Pregunta[]);
@@ -299,7 +353,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       if (activeSection === 'preguntas') {
         let request = supabase
           .from('preguntas')
-          .select('*, respuestas(*)', { count: 'exact' })
+          .select('*, respuestas(*), pregunta_tema(tema_id)', { count: 'exact' })
           .order('created_at', { ascending: false });
         if (searchTerm.trim()) request = request.ilike('enunciado', `%${searchTerm.trim()}%`);
         if (activeFilter !== 'todos') request = request.eq('estado', activeFilter);
@@ -385,6 +439,28 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     currentValue: boolean,
   ) {
     const nextValue = !currentValue;
+    if (table === 'planes') {
+      const plan = planes.find((item) => item.id === id);
+      if (!plan) return;
+      const { error } = await supabase.rpc('guardar_plan_admin', {
+        p_plan_id: plan.id,
+        p_codigo: plan.codigo,
+        p_nombre: plan.nombre,
+        p_precio_centimos: plan.precio_centimos,
+        p_moneda: plan.moneda ?? 'EUR',
+        p_duracion_meses: plan.duracion_meses,
+        p_activo: nextValue,
+        p_orden: plan.orden,
+      });
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+      setPlanes((current) =>
+        current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
+      );
+      return;
+    }
     const { error } = await supabase.from(table).update({ activo: nextValue }).eq('id', id);
 
     if (error) {
@@ -402,19 +478,46 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
         current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
       );
     }
-    if (table === 'planes') {
-      setPlanes((current) =>
-        current.map((item) => (item.id === id ? { ...item, activo: nextValue } : item)),
-      );
+  }
+
+  async function deleteTema(tema: Tema) {
+    if (
+      !window.confirm(
+        `¿Eliminar el tema "${tema.nombre}"?\n\nSe eliminará permanentemente si no está asociado a convocatorias, preguntas ni tests realizados. Si tiene dependencias, puedes desactivarlo en su lugar.`,
+      )
+    ) {
+      return;
     }
+
+    setErrorMessage('');
+    const { error } = await supabase.rpc('eliminar_tema_admin', { p_tema_id: tema.id });
+    if (error) {
+      setErrorMessage(
+        error.message.includes('No se puede eliminar el tema')
+          ? error.message
+          : 'No se pudo eliminar el tema. Inténtalo de nuevo.',
+      );
+      return;
+    }
+
+    setTemas((current) => current.filter((item) => item.id !== tema.id));
+    await loadData();
   }
 
   async function saveConvocatoria(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const optionalText = (name: string) => String(formData.get(name) ?? '').trim() || null;
     const payload = {
       nombre: String(formData.get('nombre') ?? '').trim(),
-      descripcion: String(formData.get('descripcion') ?? '').trim() || null,
+      descripcion: optionalText('descripcion'),
+      organismo_convocante: optionalText('organismo_convocante'),
+      ambito: optionalText('ambito'),
+      categoria: optionalText('categoria'),
+      grupo: optionalText('grupo'),
+      fuente_oficial_url: optionalText('fuente_oficial_url'),
+      informacion_url: optionalText('informacion_url'),
       activo: String(formData.get('activo') ?? 'true') === 'true',
     };
 
@@ -423,19 +526,27 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       return;
     }
 
-    const { error } = await supabase.from('convocatorias').insert(payload);
+    const request = editingConvocatoriaId
+      ? supabase.from('convocatorias').update(payload).eq('id', editingConvocatoriaId)
+      : supabase.from('convocatorias').insert(payload);
+    const { error } = await request;
     if (error) {
       setErrorMessage(error.message);
       return;
     }
 
-    event.currentTarget.reset();
+    form.reset();
+    setEditingConvocatoriaId(null);
     await loadData();
   }
 
   async function saveTema(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    setErrorMessage('');
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const numero = Number(formData.get('numero'));
+    const orden = Number(formData.get('orden'));
     const payload = {
       nombre: String(formData.get('nombre') ?? '').trim(),
       descripcion: String(formData.get('descripcion') ?? '').trim() || null,
@@ -447,22 +558,86 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       return;
     }
 
-    const { error } = await supabase.from('temas').insert(payload);
-    if (error) {
-      setErrorMessage(error.message);
+    if (
+      !editingTemaId &&
+      topicConvocatoriaId &&
+      (!Number.isInteger(numero) || numero <= 0 || !Number.isInteger(orden) || orden <= 0)
+    ) {
+      setErrorMessage('El número y el orden del tema deben ser enteros positivos.');
       return;
     }
 
-    event.currentTarget.reset();
+    let existingRelations: Array<{ tema_id: string; numero: number; orden: number }> = [];
+    if (!editingTemaId && topicConvocatoriaId) {
+      const { data, error } = await supabase
+        .from('convocatoria_tema')
+        .select('tema_id, numero, orden')
+        .eq('convocatoria_id', topicConvocatoriaId);
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+      existingRelations = data ?? [];
+      if (
+        existingRelations.some(
+          (relation) => relation.numero === numero || relation.orden === orden,
+        )
+      ) {
+        setErrorMessage('Ese número o posición ya está asignado en la convocatoria.');
+        return;
+      }
+    }
+
+    let savedTemaId = editingTemaId;
+    if (editingTemaId) {
+      const { error } = await supabase.from('temas').update(payload).eq('id', editingTemaId);
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+    } else {
+      const { data, error } = await supabase.from('temas').insert(payload).select('id').single();
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+      savedTemaId = data.id;
+
+      if (topicConvocatoriaId) {
+        const { error: associationError } = await supabase.rpc(
+          'guardar_temas_convocatoria_admin',
+          {
+            p_convocatoria_id: topicConvocatoriaId,
+            p_relaciones: [...existingRelations, { tema_id: savedTemaId, numero, orden }],
+          },
+        );
+        if (associationError) {
+          setErrorMessage(
+            'El tema se creó, pero no se pudo vincular. Puedes asociarlo desde la gestión de convocatorias.',
+          );
+        }
+      }
+    }
+
+    form.reset();
+    setTopicConvocatoriaId('');
+    setTopicNumero('1');
+    setTopicOrden('1');
+    setEditingTemaId(null);
     await loadData();
   }
 
   async function saveExamen(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const payload = {
       nombre: String(formData.get('nombre') ?? '').trim(),
+      fecha: String(formData.get('fecha') ?? '').trim() || null,
       descripcion: String(formData.get('descripcion') ?? '').trim() || null,
+      url_examen: String(formData.get('url_examen') ?? '').trim() || null,
+      url_plantilla_respuestas:
+        String(formData.get('url_plantilla_respuestas') ?? '').trim() || null,
       es_oficial: String(formData.get('es_oficial') ?? 'true') === 'true',
     };
 
@@ -471,13 +646,123 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       return;
     }
 
-    const { error } = await supabase.from('examenes').insert(payload);
+    const request = editingExamenId
+      ? supabase.from('examenes').update(payload).eq('id', editingExamenId)
+      : supabase.from('examenes').insert(payload);
+    const { error } = await request;
     if (error) {
       setErrorMessage(error.message);
       return;
     }
 
-    event.currentTarget.reset();
+    form.reset();
+    setEditingExamenId(null);
+    await loadData();
+  }
+
+  async function savePlan(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const payload = {
+      codigo: String(formData.get('codigo') ?? '').trim(),
+      nombre: String(formData.get('nombre') ?? '').trim(),
+      precioCentimos: Math.round(Number(formData.get('precio_euros')) * 100),
+      moneda: 'EUR',
+      duracionMeses: Number(formData.get('duracion_meses')),
+      activo: formData.get('activo') === 'on',
+      orden: Number(formData.get('orden')),
+    };
+
+    if (
+      !payload.codigo ||
+      !payload.nombre ||
+      !Number.isInteger(payload.precioCentimos) ||
+      payload.precioCentimos <= 0 ||
+      ![1, 6, 12].includes(payload.duracionMeses) ||
+      !Number.isInteger(payload.orden) ||
+      payload.orden <= 0
+    ) {
+      setErrorMessage('Revisa el código, nombre, precio, duración y orden del plan.');
+      return;
+    }
+
+    const { error } = await supabase.rpc('guardar_plan_admin', {
+      p_plan_id: editingPlanId,
+      p_codigo: payload.codigo,
+      p_nombre: payload.nombre,
+      p_precio_centimos: payload.precioCentimos,
+      p_moneda: payload.moneda,
+      p_duracion_meses: payload.duracionMeses,
+      p_activo: payload.activo,
+      p_orden: payload.orden,
+    });
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    form.reset();
+    setEditingPlanId(null);
+    await loadData();
+  }
+
+  function openConvocatoriaAssociations(convocatoriaId: string) {
+    if (managedConvocatoriaId === convocatoriaId) {
+      setManagedConvocatoriaId(null);
+      return;
+    }
+    setManagedConvocatoriaId(convocatoriaId);
+    setManagedTopicRelations(
+      convocatoriaTemas
+        .filter((relation) => relation.convocatoria_id === convocatoriaId)
+        .map(({ tema_id, numero, orden }) => ({ convocatoria_id: convocatoriaId, tema_id, numero, orden })),
+    );
+    setManagedExamIds(
+      convocatoriaExamenes
+        .filter((relation) => relation.convocatoria_id === convocatoriaId)
+        .map((relation) => relation.examen_id),
+    );
+  }
+
+  async function saveConvocatoriaAssociations() {
+    if (!managedConvocatoriaId) return;
+    if (
+      managedTopicRelations.some(
+        (relation) =>
+          !Number.isInteger(relation.numero) ||
+          relation.numero <= 0 ||
+          !Number.isInteger(relation.orden) ||
+          relation.orden <= 0,
+      )
+    ) {
+      setErrorMessage('El número y el orden de cada tema deben ser enteros positivos.');
+      return;
+    }
+
+    const { error: topicsError } = await supabase.rpc('guardar_temas_convocatoria_admin', {
+      p_convocatoria_id: managedConvocatoriaId,
+      p_relaciones: managedTopicRelations.map(({ tema_id, numero, orden }) => ({
+        tema_id,
+        numero,
+        orden,
+      })),
+    });
+    if (topicsError) {
+      setErrorMessage(topicsError.message);
+      return;
+    }
+
+    const { error: examsError } = await supabase.rpc('guardar_examenes_convocatoria_admin', {
+      p_convocatoria_id: managedConvocatoriaId,
+      p_examen_ids: managedExamIds,
+    });
+    if (examsError) {
+      setErrorMessage(examsError.message);
+      return;
+    }
+
+    setManagedConvocatoriaId(null);
     await loadData();
   }
 
@@ -488,62 +773,51 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       setErrorMessage('El enunciado de la pregunta es obligatorio.');
       return;
     }
+    if (
+      questionForm.numero &&
+      (!Number.isInteger(Number(questionForm.numero)) || Number(questionForm.numero) <= 0)
+    ) {
+      setErrorMessage('El número de pregunta debe ser un entero positivo.');
+      return;
+    }
 
     const validAnswers = questionForm.answers.filter((answer) => answer.texto.trim());
-    if (validAnswers.length !== 4) {
+    if (questionForm.estado === 'publicada' && validAnswers.length !== 4) {
       setErrorMessage('Cada pregunta debe tener exactamente cuatro opciones con texto.');
       return;
     }
-    if (validAnswers.filter((answer) => answer.es_correcta).length !== 1) {
+    if (
+      questionForm.estado === 'publicada' &&
+      validAnswers.filter((answer) => answer.es_correcta).length !== 1
+    ) {
       setErrorMessage('Cada pregunta debe tener exactamente una respuesta correcta.');
       return;
     }
 
     try {
-      const insertion = await supabase
-        .from('preguntas')
-        .insert({
-          enunciado: questionForm.enunciado,
-          estado: questionForm.estado,
-          origen: questionForm.origen,
-          situacion: questionForm.situacion,
-          examen_id: questionForm.examen_id || null,
-        })
-        .select('id')
-        .single();
-
-      if (insertion.error) {
-        throw insertion.error;
-      }
-
-      const questionId = insertion.data.id;
-
-      const answerRows = validAnswers.map((answer, index) => ({
-        pregunta_id: questionId,
-        orden: index + 1,
+      const { error } = await supabase.rpc('guardar_pregunta_admin', {
+        p_pregunta_id: editingPreguntaId,
+        p_datos: {
+        numero: questionForm.numero ? Number(questionForm.numero) : null,
+        enunciado: questionForm.enunciado.trim(),
+        explicacion: questionForm.explicacion.trim() || null,
+        fuente_url: questionForm.fuente_url.trim() || null,
+        estado: questionForm.estado,
+        origen: questionForm.origen,
+        situacion: questionForm.situacion,
+        examen_id: questionForm.examen_id || null,
+        },
+        p_respuestas: validAnswers.map((answer) => ({
+        orden: answer.orden,
         texto: answer.texto.trim(),
         es_correcta: answer.es_correcta,
-      }));
-
-      const { error } = await supabase.from('respuestas').insert(answerRows);
-      if (error) {
-        throw error;
-      }
-
-      if (questionForm.topicIds.length > 0) {
-        const topicRows = questionForm.topicIds.map((topicId) => ({
-          pregunta_id: questionId,
-          tema_id: topicId,
-        }));
-
-        const { error: topicError } = await supabase.from('pregunta_tema').insert(topicRows);
-        if (topicError) {
-          throw topicError;
-        }
-      }
+        })),
+        p_tema_ids: questionForm.topicIds,
+      });
+      if (error) throw error;
 
       setQuestionForm(emptyQuestionForm);
-      event.currentTarget.reset();
+      setEditingPreguntaId(null);
       await loadData();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo guardar la pregunta.';
@@ -718,6 +992,10 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       ? suscripciones
       : getPageItems(filteredSubscriptions, currentPage).items;
   const paginatedPlans = getPageItems(filteredPlans, currentPage).items;
+  const editingConvocatoria = convocatorias.find((item) => item.id === editingConvocatoriaId);
+  const editingTema = temas.find((item) => item.id === editingTemaId);
+  const editingExamen = examenes.find((item) => item.id === editingExamenId);
+  const editingPlan = planes.find((item) => item.id === editingPlanId);
 
   const changeSection = (section: SectionKey) => {
     setActiveSection(section);
@@ -910,9 +1188,19 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               <div>
                 <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                  {item.descripcion ?? 'Sin descripción'}
-                </p>
-              </div>
+                {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
+                  .filter(Boolean)
+                  .join(' · ') || item.descripcion || 'Sin descripción'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingConvocatoriaId(item.id)}
+                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+              >
+                Editar
+              </button>
               <button
                 type="button"
                 onClick={() => toggleEntityActive('convocatorias', item.id, Boolean(item.activo))}
@@ -924,7 +1212,160 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                 {item.activo ? 'Activa' : 'Inactiva'}
               </button>
             </div>
-          </article>
+          </div>
+          <button
+            type="button"
+            onClick={() => openConvocatoriaAssociations(item.id)}
+            aria-expanded={managedConvocatoriaId === item.id}
+            className="mt-4 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+          >
+            {managedConvocatoriaId === item.id
+              ? 'Cerrar temas y exámenes'
+              : 'Gestionar temas y exámenes'}
+          </button>
+          {managedConvocatoriaId === item.id ? (
+            <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
+              <section>
+                <h4 className="text-sm font-semibold text-[var(--ink)]">Temas asociados</h4>
+                <div className="mt-3 space-y-2">
+                  {managedTopicRelations.map((relation) => (
+                    <div
+                      key={relation.tema_id}
+                      className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_5rem_auto]"
+                    >
+                      <span className="self-center text-sm">
+                        {temas.find((tema) => tema.id === relation.tema_id)?.nombre ??
+                          'Tema no disponible'}
+                      </span>
+                      <label className="text-xs">
+                        <span className="sr-only">Número</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`Número de ${temas.find((tema) => tema.id === relation.tema_id)?.nombre ?? 'tema'}`}
+                          value={relation.numero}
+                          onChange={(event) =>
+                            setManagedTopicRelations((current) =>
+                              current.map((item) =>
+                                item.tema_id === relation.tema_id
+                                  ? { ...item, numero: Number(event.target.value) }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="w-full rounded-lg border border-[var(--line)] px-2 py-2"
+                        />
+                      </label>
+                      <label className="text-xs">
+                        <span className="sr-only">Orden</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          aria-label={`Orden de ${temas.find((tema) => tema.id === relation.tema_id)?.nombre ?? 'tema'}`}
+                          value={relation.orden}
+                          onChange={(event) =>
+                            setManagedTopicRelations((current) =>
+                              current.map((item) =>
+                                item.tema_id === relation.tema_id
+                                  ? { ...item, orden: Number(event.target.value) }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="w-full rounded-lg border border-[var(--line)] px-2 py-2"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setManagedTopicRelations((current) =>
+                            current.filter((item) => item.tema_id !== relation.tema_id),
+                          )
+                        }
+                        className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-semibold">Añadir tema existente</span>
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const temaId = event.target.value;
+                      if (!temaId || managedTopicRelations.some((item) => item.tema_id === temaId))
+                        return;
+                      const nextPosition =
+                        Math.max(0, ...managedTopicRelations.map((relation) => relation.orden)) + 1;
+                      setManagedTopicRelations((current) => [
+                        ...current,
+                        {
+                          convocatoria_id: item.id,
+                          tema_id: temaId,
+                          numero: nextPosition,
+                          orden: nextPosition,
+                        },
+                      ]);
+                    }}
+                    className="w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2"
+                  >
+                    <option value="">Selecciona un tema…</option>
+                    {temas
+                      .filter(
+                        (tema) =>
+                          !managedTopicRelations.some(
+                            (relation) => relation.tema_id === tema.id,
+                          ),
+                      )
+                      .map((tema) => (
+                        <option key={tema.id} value={tema.id}>
+                          {tema.nombre}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </section>
+              <section>
+                <h4 className="text-sm font-semibold text-[var(--ink)]">Exámenes asociados</h4>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {examenes.map((examen) => (
+                    <label
+                      key={examen.id}
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={managedExamIds.includes(examen.id)}
+                        onChange={(event) =>
+                          setManagedExamIds((current) =>
+                            event.target.checked
+                              ? [...current, examen.id]
+                              : current.filter((id) => id !== examen.id),
+                          )
+                        }
+                      />
+                      {examen.nombre}
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <button
+                type="button"
+                onClick={() => void saveConvocatoriaAssociations()}
+                className="w-full rounded-full bg-[var(--coral)] px-5 py-3 text-sm font-semibold text-white"
+              >
+                Guardar asociaciones
+              </button>
+              <p className="text-xs text-[var(--muted)]">
+                Al retirar una asociación no se elimina el tema, el examen ni sus preguntas.
+              </p>
+            </div>
+          ) : null}
+        </article>
         ))}
         {filteredConvocatorias.length === 0 ? (
           <p className="rounded-xl border border-[#e5e1d8] bg-white p-8 text-center text-sm text-[#77756e]">
@@ -934,15 +1375,17 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       </div>
 
       <form
+        key={`convocatoria-${editingConvocatoriaId ?? 'new'}`}
         onSubmit={saveConvocatoria}
         className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
       >
-        <p className="eyebrow">Crear convocatoria</p>
+        <p className="eyebrow">{editingConvocatoria ? 'Editar convocatoria' : 'Crear convocatoria'}</p>
         <div className="mt-4 space-y-4">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
             <input
               name="nombre"
+              defaultValue={editingConvocatoria?.nombre ?? ''}
               className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
@@ -950,18 +1393,50 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
             <textarea
               name="descripcion"
+              defaultValue={editingConvocatoria?.descripcion ?? ''}
               className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
+          {[
+            ['organismo_convocante', 'Organismo convocante', editingConvocatoria?.organismo_convocante],
+            ['ambito', 'Ámbito', editingConvocatoria?.ambito],
+            ['categoria', 'Categoría', editingConvocatoria?.categoria],
+            ['grupo', 'Grupo', editingConvocatoria?.grupo],
+            ['fuente_oficial_url', 'URL de la fuente oficial', editingConvocatoria?.fuente_oficial_url],
+            ['informacion_url', 'URL de información', editingConvocatoria?.informacion_url],
+          ].map(([name, label, value]) => (
+            <label key={name} className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+              <input
+                name={name}
+                type={String(name).endsWith('_url') ? 'url' : 'text'}
+                defaultValue={value ?? ''}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+          ))}
           <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input type="checkbox" name="activo" defaultChecked />
+            <input
+              type="checkbox"
+              name="activo"
+              defaultChecked={editingConvocatoria?.activo ?? true}
+            />
             Activa
           </label>
+          {editingConvocatoria ? (
+            <button
+              type="button"
+              onClick={() => setEditingConvocatoriaId(null)}
+              className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Cancelar edición
+            </button>
+          ) : null}
           <button
             type="submit"
             className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
           >
-            Guardar convocatoria
+            {editingConvocatoria ? 'Guardar cambios' : 'Guardar convocatoria'}
           </button>
         </div>
       </form>
@@ -983,31 +1458,52 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                   {item.descripcion ?? 'Sin descripción'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => toggleEntityActive('temas', item.id, Boolean(item.activo))}
-                className={[
-                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
-                ].join(' ')}
-              >
-                {item.activo ? 'Activo' : 'Inactivo'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTopicConvocatoriaId('');
+                    setEditingTemaId(item.id);
+                  }}
+                  className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleEntityActive('temas', item.id, Boolean(item.activo))}
+                  className={[
+                    'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                    item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                  ].join(' ')}
+                >
+                  {item.activo ? 'Activo' : 'Inactivo'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteTema(item)}
+                  className="rounded-full border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                >
+                  Eliminar
+                </button>
+              </div>
             </div>
           </article>
         ))}
       </div>
 
       <form
+        key={`tema-${editingTemaId ?? 'new'}`}
         onSubmit={saveTema}
         className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
       >
-        <p className="eyebrow">Crear tema</p>
+        <p className="eyebrow">{editingTema ? 'Editar tema' : 'Crear tema'}</p>
         <div className="mt-4 space-y-4">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
             <input
               name="nombre"
+              defaultValue={editingTema?.nombre ?? ''}
               className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
@@ -1015,18 +1511,99 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
             <textarea
               name="descripcion"
+              defaultValue={editingTema?.descripcion ?? ''}
               className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
+          {!editingTema ? (
+            <>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                  Convocatoria (opcional)
+                </span>
+                <select
+                  name="convocatoria_id"
+                  value={topicConvocatoriaId}
+                  onChange={(event) => {
+                    const convocatoriaId = event.target.value;
+                    const relations = convocatoriaTemas.filter(
+                      (relation) => relation.convocatoria_id === convocatoriaId,
+                    );
+                    setTopicConvocatoriaId(convocatoriaId);
+                    setTopicNumero(
+                      String(Math.max(0, ...relations.map((relation) => relation.numero)) + 1),
+                    );
+                    setTopicOrden(
+                      String(Math.max(0, ...relations.map((relation) => relation.orden)) + 1),
+                    );
+                  }}
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                >
+                  <option value="">Sin convocatoria asociada</option>
+                  {convocatorias.map((convocatoria) => (
+                    <option key={convocatoria.id} value={convocatoria.id}>
+                      {convocatoria.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {topicConvocatoriaId ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                      Número del tema
+                    </span>
+                    <input
+                      name="numero"
+                      type="number"
+                      min="1"
+                      step="1"
+                      required
+                      value={topicNumero}
+                      onChange={(event) => setTopicNumero(event.target.value)}
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                      Orden
+                    </span>
+                    <input
+                      name="orden"
+                      type="number"
+                      min="1"
+                      step="1"
+                      required
+                      value={topicOrden}
+                      onChange={(event) => setTopicOrden(event.target.value)}
+                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </>
+          ) : null}
           <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input type="checkbox" name="activo" defaultChecked />
+            <input type="checkbox" name="activo" defaultChecked={editingTema?.activo ?? true} />
             Activo
           </label>
+          {editingTema ? (
+            <button
+              type="button"
+              onClick={() => {
+                setTopicConvocatoriaId('');
+                setEditingTemaId(null);
+              }}
+              className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Cancelar edición
+            </button>
+          ) : null}
           <button
             type="submit"
             className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
           >
-            Guardar tema
+            {editingTema ? 'Guardar cambios' : 'Guardar tema'}
           </button>
         </div>
       </form>
@@ -1041,24 +1618,49 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             key={item.id}
             className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
           >
-            <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              {item.descripcion ?? 'Sin descripción'}
-            </p>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {item.fecha ?? 'Sin fecha'} · {item.es_oficial ? 'Oficial' : 'No oficial'}
+                </p>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  {item.descripcion ?? 'Sin descripción'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingExamenId(item.id)}
+                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+              >
+                Editar
+              </button>
+            </div>
           </article>
         ))}
       </div>
 
       <form
+        key={`examen-${editingExamenId ?? 'new'}`}
         onSubmit={saveExamen}
         className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
       >
-        <p className="eyebrow">Crear examen</p>
+        <p className="eyebrow">{editingExamen ? 'Editar examen' : 'Crear examen'}</p>
         <div className="mt-4 space-y-4">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
             <input
               name="nombre"
+              defaultValue={editingExamen?.nombre ?? ''}
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Fecha</span>
+            <input
+              name="fecha"
+              type="date"
+              defaultValue={editingExamen?.fecha ?? ''}
               className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
@@ -1066,18 +1668,50 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
             <textarea
               name="descripcion"
+              defaultValue={editingExamen?.descripcion ?? ''}
               className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
             />
           </label>
+          {[
+            ['url_examen', 'URL del examen', editingExamen?.url_examen],
+            [
+              'url_plantilla_respuestas',
+              'URL de la plantilla de respuestas',
+              editingExamen?.url_plantilla_respuestas,
+            ],
+          ].map(([name, label, value]) => (
+            <label key={name} className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+              <input
+                name={name}
+                type="url"
+                defaultValue={value ?? ''}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+          ))}
           <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input type="checkbox" name="es_oficial" defaultChecked />
+            <input
+              type="checkbox"
+              name="es_oficial"
+              defaultChecked={editingExamen?.es_oficial ?? true}
+            />
             Examen oficial
           </label>
+          {editingExamen ? (
+            <button
+              type="button"
+              onClick={() => setEditingExamenId(null)}
+              className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Cancelar edición
+            </button>
+          ) : null}
           <button
             type="submit"
             className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
           >
-            Guardar examen
+            {editingExamen ? 'Guardar cambios' : 'Guardar examen'}
           </button>
         </div>
       </form>
@@ -1102,15 +1736,48 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <p className="mt-2 text-sm text-[var(--muted)]">
               {item.respuestas?.length ?? 0} respuestas
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingPreguntaId(item.id);
+                setQuestionForm({
+                  enunciado: item.enunciado,
+                  numero: item.numero == null ? '' : String(item.numero),
+                  explicacion: item.explicacion ?? '',
+                  fuente_url: item.fuente_url ?? '',
+                  estado: (item.estado ?? 'revision') as QuestionForm['estado'],
+                  origen: (item.origen ?? 'propia') as QuestionForm['origen'],
+                  situacion: (item.situacion ?? 'ordinaria') as QuestionForm['situacion'],
+                  examen_id: item.examen_id ?? '',
+                  answers: emptyQuestionForm.answers.map((answer) => {
+                    const savedAnswer = item.respuestas?.find(
+                      (candidate) => candidate.orden === answer.orden,
+                    );
+                    return savedAnswer
+                      ? {
+                          orden: answer.orden,
+                          texto: savedAnswer.texto,
+                          es_correcta: savedAnswer.es_correcta,
+                        }
+                      : answer;
+                  }),
+                  topicIds: item.pregunta_tema?.map((relation) => relation.tema_id) ?? [],
+                });
+              }}
+              className="mt-3 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+            >
+              Editar pregunta
+            </button>
           </article>
         ))}
       </div>
 
       <form
+        key={`pregunta-${editingPreguntaId ?? 'new'}`}
         onSubmit={saveQuestion}
         className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
       >
-        <p className="eyebrow">Nueva pregunta</p>
+        <p className="eyebrow">{editingPreguntaId ? 'Editar pregunta' : 'Nueva pregunta'}</p>
         <div className="mt-4 space-y-4">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Enunciado</span>
@@ -1123,7 +1790,20 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             />
           </label>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Número</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={questionForm.numero}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({ ...current, numero: event.target.value }))
+                }
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Estado</span>
               <select
@@ -1141,7 +1821,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                 <option value="desactivada">Desactivada</option>
               </select>
             </label>
+          </div>
 
+          <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Origen</span>
               <select
@@ -1177,6 +1859,29 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               </select>
             </label>
           </div>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Explicación</span>
+            <textarea
+              value={questionForm.explicacion}
+              onChange={(event) =>
+                setQuestionForm((current) => ({ ...current, explicacion: event.target.value }))
+              }
+              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">URL de la fuente</span>
+            <input
+              type="url"
+              value={questionForm.fuente_url}
+              onChange={(event) =>
+                setQuestionForm((current) => ({ ...current, fuente_url: event.target.value }))
+              }
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
 
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Examen</span>
@@ -1276,8 +1981,20 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             type="submit"
             className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
           >
-            Guardar pregunta
+            {editingPreguntaId ? 'Guardar cambios' : 'Guardar pregunta'}
           </button>
+          {editingPreguntaId ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingPreguntaId(null);
+                setQuestionForm(emptyQuestionForm);
+              }}
+              className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Cancelar edición
+            </button>
+          ) : null}
         </div>
       </form>
     </div>
@@ -1328,23 +2045,135 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                 <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
                 <p className="mt-1 text-sm text-[var(--muted)]">
                   {item.codigo} · {(item.precio_centimos ?? 0) / 100} € · {item.duracion_meses ?? 0}{' '}
-                  meses
+                  meses · {item.moneda ?? 'EUR'} · Orden {item.orden ?? '—'}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => toggleEntityActive('planes', item.id, Boolean(item.activo))}
-                className={[
-                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
-                ].join(' ')}
-              >
-                {item.activo ? 'Disponible' : 'No disponible'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPlanId(item.id)}
+                  className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleEntityActive('planes', item.id, Boolean(item.activo))}
+                  className={[
+                    'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                    item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                  ].join(' ')}
+                >
+                  {item.activo ? 'Disponible' : 'No disponible'}
+                </button>
+              </div>
             </div>
           </article>
         ))}
       </div>
+
+      <form
+        key={`plan-${editingPlanId ?? 'new'}`}
+        onSubmit={savePlan}
+        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+      >
+        <p className="eyebrow">{editingPlan ? 'Editar plan' : 'Crear plan'}</p>
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Código</span>
+            <input
+              name="codigo"
+              required
+              defaultValue={editingPlan?.codigo ?? ''}
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
+            <input
+              name="nombre"
+              required
+              defaultValue={editingPlan?.nombre ?? ''}
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+              Precio por periodo (EUR)
+            </span>
+            <input
+              name="precio_euros"
+              type="number"
+              min="0.01"
+              step="0.01"
+              required
+              defaultValue={
+                editingPlan?.precio_centimos == null
+                  ? ''
+                  : (editingPlan.precio_centimos / 100).toFixed(2)
+              }
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+              Duración (meses)
+            </span>
+            <select
+              name="duracion_meses"
+              defaultValue={editingPlan?.duracion_meses ?? 1}
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            >
+              <option value="1">1 mes</option>
+              <option value="6">6 meses</option>
+              <option value="12">12 meses</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+              Orden de presentación
+            </span>
+            <input
+              name="orden"
+              type="number"
+              min="1"
+              step="1"
+              required
+              defaultValue={
+                editingPlan?.orden ?? Math.max(0, ...planes.map((plan) => plan.orden ?? 0)) + 1
+              }
+              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+            />
+          </label>
+          <p className="text-xs text-[var(--muted)]">
+            Moneda fija por la configuración actual: EUR. Cambiar el catálogo no modifica los
+            importes ya contratados.
+          </p>
+          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+            <input
+              type="checkbox"
+              name="activo"
+              defaultChecked={editingPlan?.activo ?? true}
+            />
+            Disponible para nuevas contrataciones
+          </label>
+          {editingPlan ? (
+            <button
+              type="button"
+              onClick={() => setEditingPlanId(null)}
+              className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
+            >
+              Cancelar edición
+            </button>
+          ) : null}
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+          >
+            {editingPlan ? 'Guardar cambios' : 'Guardar plan'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 
