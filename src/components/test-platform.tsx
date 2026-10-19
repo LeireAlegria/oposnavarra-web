@@ -6,19 +6,22 @@ import Link from 'next/link';
 
 import {
   countAvailableTestQuestions,
+  createOfficialTestAttempt,
   createTestAttempt,
   finalizeTestAttempt,
   getTestAttempt,
   getTestCatalog,
+  getOfficialExamCatalog,
   getTestHistory,
   listInProgressTestAttempts,
   saveTestAnswer,
   type TestAttempt,
   type TestAttemptSummary,
   type TestConvocation,
+  type TestOfficialExam,
 } from '@/lib/test-platform-api';
 
-type TabKey = 'crear' | 'curso' | 'resultados';
+type TabKey = 'crear' | 'oficiales' | 'curso' | 'resultados';
 const HISTORY_PAGE_SIZE = 10;
 const QUESTION_COUNT_OPTIONS = [10, 20, 30, 40, 50];
 const TIME_LIMIT_OPTIONS = [0, 600, 1200, 1800, 2700, 3600];
@@ -51,6 +54,12 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatExamDate(value: string) {
+  return new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeZone: 'UTC' }).format(
+    new Date(value),
+  );
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
@@ -58,10 +67,14 @@ function getErrorMessage(error: unknown, fallback: string) {
 export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPlatformProps) {
   const [activeTab, setActiveTab] = useState<TabKey>(() => (canPractice ? 'crear' : 'resultados'));
   const [convocations, setConvocations] = useState<TestConvocation[]>([]);
+  const [officialExams, setOfficialExams] = useState<TestOfficialExam[]>([]);
   const [convocationId, setConvocationId] = useState('');
+  const [officialConvocationId, setOfficialConvocationId] = useState('');
+  const [officialExamId, setOfficialExamId] = useState('');
   const [topicIds, setTopicIds] = useState<string[]>([]);
   const [questionCount, setQuestionCount] = useState<number>(20);
   const [timeLimitSeconds, setTimeLimitSeconds] = useState<number>(0);
+  const [officialTimeLimitSeconds, setOfficialTimeLimitSeconds] = useState<number>(0);
   const [availableQuestions, setAvailableQuestions] = useState<number | null>(null);
   const [activeTests, setActiveTests] = useState<TestAttemptSummary[]>([]);
   const [history, setHistory] = useState<TestAttemptSummary[]>([]);
@@ -83,6 +96,13 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
   const [timeExpired, setTimeExpired] = useState(false);
   const expiredAttemptIdRef = useRef<string | null>(null);
   const selectedConvocation = convocations.find((convocation) => convocation.id === convocationId);
+  const availableOfficialExams = officialExams.filter(
+    (exam) => exam.convocationId === officialConvocationId,
+  );
+  const selectedOfficialExam = availableOfficialExams.find((exam) => exam.id === officialExamId);
+  const officialConvocations = [
+    ...new Map(officialExams.map((exam) => [exam.convocationId, exam])).values(),
+  ];
   const availableTopics = selectedConvocation?.topics ?? [];
   const allTopicsSelected =
     availableTopics.length > 0 && topicIds.length === availableTopics.length;
@@ -110,16 +130,22 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
         }
 
         if (canPractice) {
-          const [catalog, inProgress] = await Promise.all([
+          const [catalog, officialCatalog, inProgress] = await Promise.all([
             getTestCatalog(),
+            getOfficialExamCatalog(),
             listInProgressTestAttempts(),
           ]);
           if (!isCurrent) return;
           setConvocations(catalog);
+          setOfficialExams(officialCatalog);
           setActiveTests(inProgress);
           if (catalog[0]) {
             setConvocationId(catalog[0].id);
             setTopicIds(catalog[0].topics.map((topic) => topic.id));
+          }
+          if (officialCatalog[0]) {
+            setOfficialConvocationId(officialCatalog[0].convocationId);
+            setOfficialExamId(officialCatalog[0].id);
           }
 
           if (inProgress[0]) {
@@ -296,6 +322,32 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     }
   };
 
+  const handleStartOfficialAttempt = async () => {
+    if (!canPractice || !selectedOfficialExam) return;
+
+    setErrorMessage('');
+    setIsStartingAttempt(true);
+    try {
+      const attemptId = await createOfficialTestAttempt({
+        convocationId: selectedOfficialExam.convocationId,
+        examId: selectedOfficialExam.id,
+        timeLimitSeconds: officialTimeLimitSeconds || null,
+      });
+      const attempt = await getTestAttempt(attemptId);
+      setActiveTests((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)]);
+      setActiveAttempt(attempt);
+      setCurrentQuestionIndex(0);
+      setElapsedSeconds(0);
+      setTimeExpired(false);
+      expiredAttemptIdRef.current = null;
+      setActiveTab('curso');
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, 'No se pudo iniciar el test oficial.'));
+    } finally {
+      setIsStartingAttempt(false);
+    }
+  };
+
   const handleAnswerSelection = async (answerId: string) => {
     if (!canPractice || !activeAttempt || activeAttempt.status !== 'in_progress') {
       return;
@@ -389,19 +441,23 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
   const pageTitle =
     activeTab === 'crear'
       ? 'Configura tu test'
-      : activeTab === 'curso'
-        ? activeAttempt?.status === 'finalized'
-          ? 'Revisión del test'
-          : 'Test en curso'
-        : 'Historial de tests';
+      : activeTab === 'oficiales'
+        ? 'Test oficiales'
+        : activeTab === 'curso'
+          ? activeAttempt?.status === 'finalized'
+            ? 'Revisión del test'
+            : 'Test en curso'
+          : 'Historial de tests';
   const pageDescription =
     activeTab === 'crear'
       ? 'Elige los temas, el número de preguntas y el tiempo para empezar.'
-      : activeTab === 'curso'
-        ? activeAttempt?.status === 'finalized'
-          ? 'Repasa tus respuestas y consulta la corrección.'
-          : 'Responde a tu ritmo y consulta tu progreso en cualquier momento.'
-        : 'Consulta los resultados de tus tests finalizados.';
+      : activeTab === 'oficiales'
+        ? 'Elige un examen oficial y responde a sus preguntas en el orden original.'
+        : activeTab === 'curso'
+          ? activeAttempt?.status === 'finalized'
+            ? 'Repasa tus respuestas y consulta la corrección.'
+            : 'Responde a tu ritmo y consulta tu progreso en cualquier momento.'
+          : 'Consulta los resultados de tus tests finalizados.';
   const answeredCount =
     activeAttempt?.questions.filter((question) => question.selectedAnswerId !== null).length ?? 0;
   const unansweredCount = (activeAttempt?.questions.length ?? 0) - answeredCount;
@@ -459,13 +515,18 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
               Convocatoria
             </p>
             <p className="mt-2 font-sans text-sm font-semibold">
-              {selectedConvocation?.name ??
+              {(activeTab === 'oficiales'
+                ? selectedOfficialExam?.convocationName
+                : activeTab === 'curso' && activeAttempt
+                  ? activeAttempt.convocationName
+                  : selectedConvocation?.name) ??
                 (canPractice ? 'Selecciona una convocatoria' : 'Solo consulta de historial')}
             </p>
           </div>
           <nav aria-label="Navegación de la plataforma" className="mt-5 grid gap-1">
             {[
-              { key: 'crear' as const, label: 'Mis tests', icon: '＋' },
+              { key: 'crear' as const, label: 'Test por temas', icon: '＋' },
+              { key: 'oficiales' as const, label: 'Test oficiales', icon: '★' },
               { key: 'curso' as const, label: 'Test en curso', icon: '☷' },
               { key: 'resultados' as const, label: 'Historial de tests', icon: '▥' },
             ].map((item) => {
@@ -515,10 +576,12 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
             <p className="text-xs text-[var(--muted)]">
               Mi espacio <span className="mx-2">/</span>
               {activeTab === 'crear'
-                ? 'Mis tests'
-                : activeTab === 'curso'
-                  ? 'Test en curso'
-                  : 'Historial de tests'}
+                ? 'Test por temas'
+                : activeTab === 'oficiales'
+                  ? 'Test oficiales'
+                  : activeTab === 'curso'
+                    ? 'Test en curso'
+                    : 'Historial de tests'}
             </p>
             <h1 className="mt-3 font-serif text-3xl font-normal tracking-[-0.04em] sm:text-4xl">
               {pageTitle}
@@ -526,6 +589,11 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
             <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{pageDescription}</p>
             {activeTab === 'curso' && activeAttempt ? (
               <div className="mt-4 flex flex-wrap gap-2">
+                {activeAttempt.officialExamName ? (
+                  <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
+                    Examen oficial: {activeAttempt.officialExamName}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
                   Convocatoria: {activeAttempt.convocationName}
                 </span>
@@ -780,6 +848,138 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
             </section>
           ) : null}
 
+          {!isLoading && activeTab === 'oficiales' ? (
+            <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(17rem,0.75fr)]">
+              <div className="rounded-2xl border border-[var(--line)] bg-white p-5 shadow-sm sm:p-7">
+                <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                  Exámenes oficiales
+                </p>
+                <h2 className="mt-2 font-serif text-2xl font-normal">
+                  Practica con el examen completo
+                </h2>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  Las preguntas aparecerán en su orden original. Elige el tiempo antes de empezar.
+                </p>
+
+                {officialExams.length === 0 ? (
+                  <p className="mt-6 rounded-xl border border-[var(--line)] bg-[#f8f7f3] p-4 text-sm text-[var(--muted)]">
+                    Todavía no hay exámenes oficiales disponibles.
+                  </p>
+                ) : (
+                  <div className="mt-6 space-y-5">
+                    <label className="block">
+                      <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                        Convocatoria
+                      </span>
+                      <select
+                        aria-label="Convocatoria del examen oficial"
+                        value={officialConvocationId}
+                        onChange={(event) => {
+                          const nextConvocationId = event.target.value;
+                          const nextExam = officialExams.find(
+                            (exam) => exam.convocationId === nextConvocationId,
+                          );
+                          setOfficialConvocationId(nextConvocationId);
+                          setOfficialExamId(nextExam?.id ?? '');
+                        }}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+                      >
+                        {officialConvocations.map((convocation) => (
+                          <option key={convocation.convocationId} value={convocation.convocationId}>
+                            {convocation.convocationName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                        Examen oficial
+                      </span>
+                      <select
+                        aria-label="Examen oficial"
+                        value={selectedOfficialExam?.id ?? ''}
+                        onChange={(event) => setOfficialExamId(event.target.value)}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+                      >
+                        {availableOfficialExams.map((exam) => (
+                          <option key={exam.id} value={exam.id}>
+                            {exam.name}
+                            {exam.date ? ` · ${formatExamDate(exam.date)}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block font-sans text-sm font-semibold text-[var(--ink)]">
+                        Tiempo
+                      </span>
+                      <select
+                        value={officialTimeLimitSeconds}
+                        onChange={(event) =>
+                          setOfficialTimeLimitSeconds(Number(event.target.value))
+                        }
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-[var(--ink)]"
+                      >
+                        {TIME_LIMIT_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option === 0 ? 'Sin límite' : `${Math.floor(option / 60)} minutos`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => void handleStartOfficialAttempt()}
+                  disabled={!canPractice || isStartingAttempt || !selectedOfficialExam}
+                  className="mt-7 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-[#bd3734] px-5 py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#a82f2c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isStartingAttempt ? 'Preparando examen…' : 'Comenzar test oficial'}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-[var(--line)] bg-[#eeede6] p-5 sm:p-7 xl:sticky xl:top-6">
+                <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                  Resumen del examen
+                </p>
+                {selectedOfficialExam ? (
+                  <dl className="mt-4 divide-y divide-[#deded7]">
+                    <div className="py-3">
+                      <dt className="text-xs text-[var(--muted)]">Convocatoria</dt>
+                      <dd className="mt-1 font-semibold">{selectedOfficialExam.convocationName}</dd>
+                    </div>
+                    <div className="py-3">
+                      <dt className="text-xs text-[var(--muted)]">Examen</dt>
+                      <dd className="mt-1 font-semibold">{selectedOfficialExam.name}</dd>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 py-3">
+                      <div>
+                        <dt className="text-xs text-[var(--muted)]">Preguntas</dt>
+                        <dd className="mt-1 font-semibold">{selectedOfficialExam.questionCount}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-[var(--muted)]">Tiempo</dt>
+                        <dd className="mt-1 font-semibold">
+                          {officialTimeLimitSeconds === 0
+                            ? 'Sin límite'
+                            : formatSeconds(officialTimeLimitSeconds)}
+                        </dd>
+                      </div>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="mt-4 text-sm text-[var(--muted)]">
+                    El resumen aparecerá cuando haya un examen disponible.
+                  </p>
+                )}
+              </div>
+            </section>
+          ) : null}
+
           {timeExpired && activeTab === 'resultados' ? (
             <p
               role="status"
@@ -803,7 +1003,10 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                         disabled={isLoadingAttempt || activeAttempt?.id === attempt.id}
                         className="min-h-10 rounded-lg border border-[var(--line)] bg-white px-3 text-left text-sm font-medium disabled:cursor-default disabled:border-[#bd3734] disabled:text-[#a82f2c]"
                       >
-                        {attempt.convocationName} · {attempt.questionCount} preguntas
+                        {attempt.officialExamName
+                          ? `${attempt.officialExamName} · ${attempt.convocationName}`
+                          : attempt.convocationName}{' '}
+                        · {attempt.questionCount} preguntas
                         {activeAttempt?.id === attempt.id ? ' · Actual' : ''}
                       </button>
                     ))}
@@ -1238,6 +1441,7 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                           {attempt.result?.porcentajeAciertos ?? 0} %
                         </h2>
                         <p className="mt-1 text-sm text-[var(--muted)]">
+                          {attempt.officialExamName ? `${attempt.officialExamName} · ` : ''}
                           Nota {attempt.result?.nota ?? 0} / 10 · {attempt.questionCount} preguntas
                         </p>
                       </div>

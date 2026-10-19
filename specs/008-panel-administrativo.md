@@ -63,6 +63,7 @@ Las reglas de publicación se garantizarán también en la base de datos, incluy
 estado, origen y situacion serán conceptos independientes. Una pregunta anulada podrá publicarse si cumple las condiciones de la 002. No se creará una tabla convocatoria_pregunta.
 Se mostrará que modificar una pregunta reutilizada afecta a todas las convocatorias en las que está disponible.
 8. Usuarios
+El listado mostrará el correo, la fecha de creación de la cuenta y el último inicio de sesión registrado por Supabase Auth, además del rol. Son datos de solo lectura obtenidos de Auth sin duplicarlos en perfiles. Si no existe un inicio de sesión se mostrará «Sin accesos registrados». Las fechas se mostrarán en español con hora de Madrid. La consulta estará restringida a administradores autenticados y verificados, con búsqueda por correo y paginación en el servidor.
 El listado permitirá buscar usuarios por correo y por los datos identificativos existentes en la 003, y filtrar por rol y estado de acceso.
 El detalle mostrará los datos de cuenta pertinentes, el estado de verificación del correo, el rol y el estado de acceso. No mostrará contraseñas, tokens ni secretos.
 Los administradores podrán:

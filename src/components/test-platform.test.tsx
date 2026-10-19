@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   countAvailableTestQuestions: vi.fn(),
+  createOfficialTestAttempt: vi.fn(),
   createTestAttempt: vi.fn(),
   finalizeTestAttempt: vi.fn(),
   getTestAttempt: vi.fn(),
   getTestCatalog: vi.fn(),
+  getOfficialExamCatalog: vi.fn(),
   getTestHistory: vi.fn(),
   listInProgressTestAttempts: vi.fn(),
   saveTestAnswer: vi.fn(),
@@ -21,6 +23,7 @@ import { TestPlatform } from './test-platform';
 const topicId = '00000000-0000-4000-8000-000000000001';
 const convocationId = '00000000-0000-4000-8000-000000000002';
 const attemptId = '00000000-0000-4000-8000-000000000003';
+const examId = '00000000-0000-4000-8000-000000000009';
 const questionId = '00000000-0000-4000-8000-000000000004';
 const answerIds = [
   '00000000-0000-4000-8000-000000000005',
@@ -35,6 +38,8 @@ const inProgressAttempt = {
   status: 'in_progress' as const,
   convocationId,
   convocationName: 'Convocatoria de prueba',
+  officialExamId: null,
+  officialExamName: null,
   selectedTopics: [topic],
   questionCount: 10,
   timeLimitSeconds: null,
@@ -102,6 +107,8 @@ const attemptSummary = {
   status: 'finalized' as const,
   convocationId,
   convocationName: 'Convocatoria de prueba',
+  officialExamId: null,
+  officialExamName: null,
   selectedTopics: [topic],
   questionCount: 10,
   timeLimitSeconds: null,
@@ -133,6 +140,16 @@ beforeEach(() => {
       topics: [{ ...topic, availableQuestions: 20 }],
     },
   ]);
+  api.getOfficialExamCatalog.mockResolvedValue([
+    {
+      id: examId,
+      name: 'Examen oficial de prueba',
+      date: '2026-05-01',
+      convocationId,
+      convocationName: 'Convocatoria de prueba',
+      questionCount: 50,
+    },
+  ]);
   api.countAvailableTestQuestions.mockResolvedValue(20);
   api.listInProgressTestAttempts.mockResolvedValue([]);
   api.getTestHistory.mockImplementation(() =>
@@ -142,6 +159,7 @@ beforeEach(() => {
     }),
   );
   api.createTestAttempt.mockResolvedValue(attemptId);
+  api.createOfficialTestAttempt.mockResolvedValue(attemptId);
   api.getTestAttempt.mockImplementation(() =>
     Promise.resolve(wasFinalized ? finalizedAttempt : inProgressAttempt),
   );
@@ -201,9 +219,35 @@ describe('TestPlatform', () => {
 
     expect(await screen.findByRole('heading', { name: 'Historial de tests' })).toBeInTheDocument();
     expect(screen.getByText('Historial vacío')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mis tests' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test por temas' })).toBeDisabled();
     expect(api.getTestCatalog).not.toHaveBeenCalled();
+    expect(api.getOfficialExamCatalog).not.toHaveBeenCalled();
     expect(api.listInProgressTestAttempts).not.toHaveBeenCalled();
+  });
+
+  it('starts the selected official exam with the chosen time limit', async () => {
+    api.getTestAttempt.mockResolvedValueOnce({
+      ...inProgressAttempt,
+      officialExamId: examId,
+      officialExamName: 'Examen oficial de prueba',
+    });
+    render(<TestPlatform {...accountProps} />);
+
+    await screen.findByRole('heading', { name: 'Configura tu test' });
+    fireEvent.click(screen.getByRole('button', { name: 'Test oficiales' }));
+
+    expect(await screen.findByRole('heading', { name: 'Test oficiales' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Tiempo' }), {
+      target: { value: '1800' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Comenzar test oficial' }));
+
+    await screen.findByText('Examen oficial: Examen oficial de prueba');
+    expect(api.createOfficialTestAttempt).toHaveBeenCalledWith({
+      convocationId,
+      examId,
+      timeLimitSeconds: 1800,
+    });
   });
 
   it('shows a recoverable error instead of an empty-history state when loading fails', async () => {

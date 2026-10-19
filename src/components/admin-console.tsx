@@ -87,6 +87,8 @@ type Pregunta = {
 
 type Perfil = {
   id: string;
+  email: string | null;
+  last_sign_in_at: string | null;
   rol?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -172,6 +174,15 @@ function getPageItems<T>(items: T[], page: number) {
   };
 }
 
+function formatUserDate(value: string | null | undefined, fallback: string): string {
+  if (!value || Number.isNaN(new Date(value).getTime())) return fallback;
+  return new Intl.DateTimeFormat('es-ES', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Europe/Madrid',
+  }).format(new Date(value));
+}
+
 export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<SectionKey>('resumen');
@@ -255,9 +266,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           .order('created_at', { ascending: false })
           .range(0, PAGE_SIZE - 1),
         supabase
-          .from('perfiles')
-          .select('*', { count: 'exact' })
+          .rpc('list_admin_users', {}, { count: 'exact' })
           .order('created_at', { ascending: false })
+          .order('id')
           .range(0, PAGE_SIZE - 1),
         supabase.from('planes').select('*').order('orden', { ascending: true }),
         supabase
@@ -368,24 +379,13 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
         }
       } else if (activeSection === 'usuarios') {
         let request = supabase
-          .from('perfiles')
-          .select('*', { count: 'exact' })
+          .rpc('list_admin_users', {}, { count: 'exact' })
           .order('created_at', { ascending: false });
         if (activeFilter !== 'todos') request = request.eq('rol', activeFilter);
         if (searchTerm.trim()) {
-          if (
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-              searchTerm.trim(),
-            )
-          ) {
-            request = request.eq('id', searchTerm.trim());
-          } else {
-            setPerfiles([]);
-            setRemoteCounts((current) => ({ ...current, usuarios: 0 }));
-            setListLoading(false);
-            return;
-          }
+          request = request.ilike('email', '%' + searchTerm.trim() + '%');
         }
+        request = request.order('id');
         const { data, count, error } = await request.range(from, to);
         if (cancelled) return;
         if (error) {
@@ -916,7 +916,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     () =>
       perfiles
         .filter((item) =>
-          `${item.id} ${item.rol ?? 'usuario'}`
+          `${item.email ?? ''} ${item.rol ?? 'usuario'}`
             .toLocaleLowerCase('es')
             .includes(searchTerm.trim().toLocaleLowerCase('es')),
         )
@@ -1408,7 +1408,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <label key={name} className="block">
               <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
               <input
-                name={name}
+                name={name ?? undefined}
                 type={String(name).endsWith('_url') ? 'url' : 'text'}
                 defaultValue={value ?? ''}
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
@@ -1683,7 +1683,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             <label key={name} className="block">
               <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
               <input
-                name={name}
+                name={name ?? undefined}
                 type="url"
                 defaultValue={value ?? ''}
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
@@ -2012,7 +2012,19 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
                 {item.rol ?? 'usuario'}
               </p>
-              <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.id}</h3>
+              <h3 className="mt-2 break-all text-xl font-semibold text-[var(--ink)]">
+                {item.email || 'Correo no disponible'}
+              </h3>
+              <dl className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                <div>
+                  <dt className="font-semibold">Fecha de creación</dt>
+                  <dd>{formatUserDate(item.created_at, 'Fecha no disponible')}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">Último acceso</dt>
+                  <dd>{formatUserDate(item.last_sign_in_at, 'Sin accesos registrados')}</dd>
+                </div>
+              </dl>
             </div>
             <button
               type="button"

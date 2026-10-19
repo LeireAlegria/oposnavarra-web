@@ -42,6 +42,8 @@ const attemptSummarySchema = z.object({
   status: z.enum(['in_progress', 'finalized']),
   convocationId: z.string().uuid(),
   convocationName: z.string(),
+  officialExamId: z.string().uuid().nullable(),
+  officialExamName: z.string().nullable(),
   selectedTopics: z.array(topicSchema),
   questionCount: z.number().int().positive(),
   timeLimitSeconds: z.number().int().positive().nullable(),
@@ -86,6 +88,14 @@ export type TestConvocation = {
   name: string;
   topics: TestCatalogTopic[];
 };
+export type TestOfficialExam = {
+  id: string;
+  name: string;
+  date: string | null;
+  convocationId: string;
+  convocationName: string;
+  questionCount: number;
+};
 export type TestResult = z.infer<typeof resultSchema>;
 export type TestAttemptSummary = z.infer<typeof attemptSummarySchema>;
 export type TestAttemptQuestion = z.infer<typeof attemptQuestionSchema>;
@@ -128,11 +138,30 @@ const catalogSchema = z.array(
   }),
 );
 
+const officialExamCatalogSchema = z.array(
+  z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    date: z.string().nullable(),
+    convocationId: z.string().uuid(),
+    convocationName: z.string(),
+    questionCount: z.number().int().positive(),
+  }),
+);
+
 export async function getTestCatalog(): Promise<TestConvocation[]> {
   return parseResponse(
     catalogSchema,
     await executeRpc('consultar_catalogo_test'),
     'consultar el catálogo de tests',
+  );
+}
+
+export async function getOfficialExamCatalog(): Promise<TestOfficialExam[]> {
+  return parseResponse(
+    officialExamCatalogSchema,
+    await executeRpc('consultar_catalogo_examenes_oficiales'),
+    'consultar el catálogo de exámenes oficiales',
   );
 }
 
@@ -164,6 +193,20 @@ export async function createTestAttempt(input: {
   });
   const row = Array.isArray(response) ? response[0] : response;
   return parseResponse(attemptIdSchema, row, 'crear el test').id;
+}
+
+export async function createOfficialTestAttempt(input: {
+  convocationId: string;
+  examId: string;
+  timeLimitSeconds: number | null;
+}): Promise<string> {
+  const response = await executeRpc('crear_intento_test_oficial', {
+    p_convocatoria_id: input.convocationId,
+    p_examen_id: input.examId,
+    p_tiempo_limite_segundos: input.timeLimitSeconds,
+  });
+  const row = Array.isArray(response) ? response[0] : response;
+  return parseResponse(attemptIdSchema, row, 'crear el test oficial').id;
 }
 
 export async function listInProgressTestAttempts(): Promise<TestAttemptSummary[]> {

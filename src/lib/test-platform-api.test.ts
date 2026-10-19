@@ -8,13 +8,50 @@ vi.mock('@/lib/supabase/client', () => ({
   createClient: () => ({ rpc }),
 }));
 
-import { getTestHistory } from './test-platform-api';
+import {
+  createOfficialTestAttempt,
+  getOfficialExamCatalog,
+  getTestHistory,
+} from './test-platform-api';
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
 describe('test-platform-api', () => {
+  it('loads and validates the official exam catalog', async () => {
+    const officialExam = {
+      id: '00000000-0000-4000-8000-000000000011',
+      name: 'Examen oficial',
+      date: '2026-05-01',
+      convocationId: '00000000-0000-4000-8000-000000000012',
+      convocationName: 'Convocatoria',
+      questionCount: 50,
+    };
+    rpc.mockResolvedValue({ data: [officialExam], error: null });
+
+    await expect(getOfficialExamCatalog()).resolves.toEqual([officialExam]);
+    expect(rpc).toHaveBeenCalledWith('consultar_catalogo_examenes_oficiales');
+  });
+
+  it('starts an official exam with its selected convocation and time limit', async () => {
+    const attemptId = '00000000-0000-4000-8000-000000000013';
+    rpc.mockResolvedValue({ data: { id: attemptId }, error: null });
+
+    await expect(
+      createOfficialTestAttempt({
+        convocationId: '00000000-0000-4000-8000-000000000012',
+        examId: '00000000-0000-4000-8000-000000000011',
+        timeLimitSeconds: 1800,
+      }),
+    ).resolves.toBe(attemptId);
+    expect(rpc).toHaveBeenCalledWith('crear_intento_test_oficial', {
+      p_convocatoria_id: '00000000-0000-4000-8000-000000000012',
+      p_examen_id: '00000000-0000-4000-8000-000000000011',
+      p_tiempo_limite_segundos: 1800,
+    });
+  });
+
   it('uses the paginated history RPC and validates its response', async () => {
     rpc.mockResolvedValue({
       data: { items: [], hasMore: false },
