@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn() }));
@@ -105,9 +105,11 @@ describe('syllabus management', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar carga' }));
     await screen.findByText('Organiza tu temario');
     fireEvent.click(screen.getByRole('button', { name: '+ Añadir bloque' }));
-    expect(screen.getByLabelText('Nombre del bloque')).toHaveFocus();
+    expect(screen.getByRole('textbox', { name: /^Nombre del bloque/ })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('Nombre del bloque'), { target: { value: 'General' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /^Nombre del bloque/ }), {
+      target: { value: 'General' },
+    });
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
   });
 });

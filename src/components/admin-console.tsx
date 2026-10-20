@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { createClient } from '@/lib/supabase/client';
 import { BonImport } from '@/components/bon-import';
+import { QuestionImport } from '@/components/question-import';
 import { ConvocationBlocks } from '@/components/convocation-blocks';
 import { getAdminUserEmails } from '@/lib/admin-user-emails';
 
@@ -79,6 +80,7 @@ type Pregunta = {
   numero?: number | null;
   explicacion?: string | null;
   fuente_url?: string | null;
+  referencia_fuente?: string | null;
   estado?: string;
   origen?: string;
   situacion?: string;
@@ -190,6 +192,7 @@ function formatUserDate(value: string | null | undefined, fallback: string): str
 export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<SectionKey>('resumen');
+  const [importExamFilter, setImportExamFilter] = useState('');
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -379,6 +382,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           .order('created_at', { ascending: false });
         if (searchTerm.trim()) request = request.ilike('enunciado', `%${searchTerm.trim()}%`);
         if (activeFilter !== 'todos') request = request.eq('estado', activeFilter);
+        if (importExamFilter) request = request.eq('examen_id', importExamFilter);
         const { data, count, error } = await request.range(from, to);
         if (cancelled) return;
         if (error) {
@@ -451,7 +455,16 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     return () => {
       cancelled = true;
     };
-  }, [activeFilter, activeSection, currentPage, loading, planFilter, searchTerm, supabase]);
+  }, [
+    activeFilter,
+    activeSection,
+    currentPage,
+    loading,
+    planFilter,
+    searchTerm,
+    supabase,
+    importExamFilter,
+  ]);
 
   async function toggleEntityActive(
     table: 'convocatorias' | 'temas' | 'planes',
@@ -735,6 +748,16 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       );
     }
   }, [convocatorias, convocatoriaExamenes]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('seccion') === 'preguntas') {
+      setActiveSection('preguntas');
+      if (params.get('estado') === 'revision') setActiveFilter('revision');
+      const exam = params.get('examen');
+      if (exam && /^[0-9a-f-]{36}$/i.test(exam)) setImportExamFilter(exam);
+    }
+  }, []);
 
   function openConvocatoriaAssociations(convocatoriaId: string) {
     if (managedConvocatoriaId === convocatoriaId) {
@@ -1632,6 +1655,22 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
   const renderPreguntas = () => (
     <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <QuestionImport exams={examenes} onSaved={() => void loadData()} />
+      {importExamFilter && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5e1d8] bg-white p-4 xl:col-span-2">
+          <p className="text-sm">
+            Examen:{' '}
+            {examenes.find((exam) => exam.id === importExamFilter)?.nombre ?? 'Examen seleccionado'}
+          </p>
+          <button
+            type="button"
+            className="rounded-lg border px-3 py-2 text-sm"
+            onClick={() => setImportExamFilter('')}
+          >
+            Ver todos los exámenes
+          </button>
+        </div>
+      )}
       <div className="space-y-4">
         {paginatedPreguntas.map((item) => (
           <article
@@ -1643,10 +1682,12 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             </p>
             <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.enunciado}</h3>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              Origen: {item.origen} · Situación: {item.situacion}
+              Origen: {item.origen === 'oficial' ? 'Examen oficial' : 'Propia'} · Situación:{' '}
+              {item.situacion}
             </p>
             <p className="mt-2 text-sm text-[var(--muted)]">
               {item.respuestas?.length ?? 0} respuestas
+              {item.referencia_fuente ? ` · Fuente: ${item.referencia_fuente}` : ''}
             </p>
             <button
               type="button"
