@@ -10,6 +10,9 @@ const topicSchema = z.object({
 });
 
 const catalogTopicSchema = topicSchema.extend({
+  blockId: z.string().uuid().optional(),
+  blockName: z.string().default('General'),
+  blockOrder: z.number().int().positive().default(1),
   availableQuestions: z.number().int().nonnegative(),
 });
 

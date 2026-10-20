@@ -103,7 +103,9 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
   const officialConvocations = [
     ...new Map(officialExams.map((exam) => [exam.convocationId, exam])).values(),
   ];
-  const availableTopics = selectedConvocation?.topics ?? [];
+  const availableTopics = [...(selectedConvocation?.topics ?? [])].sort(
+    (a, b) => a.blockOrder - b.blockOrder || a.order - b.order,
+  );
   const allTopicsSelected =
     availableTopics.length > 0 && topicIds.length === availableTopics.length;
 
@@ -692,7 +694,7 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                       </button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {availableTopics.map((topic) => (
+                      {availableTopics.map((topic, index) => (
                         <label
                           key={topic.id}
                           className={[
@@ -708,7 +710,13 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                             onChange={() => toggleTopic(topic.id)}
                             className="h-4 w-4 accent-[#bd3734] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]"
                           />
-                          <span>{topic.name}</span>
+                          <span>
+                            {(index === 0 ||
+                              availableTopics[index - 1].blockId !== topic.blockId) && (
+                              <strong className="mb-2 block">{topic.blockName}</strong>
+                            )}
+                            {topic.number}. {topic.name}
+                          </span>
                         </label>
                       ))}
                     </div>
