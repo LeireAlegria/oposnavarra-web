@@ -47,9 +47,18 @@ export async function signInWithPassword(email: string, password: string): Promi
   return { data, error: null };
 }
 
-export async function signUpWithEmail(email: string, password: string): Promise<AuthActionResult> {
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  next = '/plataforma',
+): Promise<AuthActionResult> {
   const supabase = createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo },
+  });
 
   if (error) {
     return { data, error: { message: normalizeAuthError(error.message) } };
@@ -58,9 +67,17 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   return { data, error: null };
 }
 
-export async function sendVerificationEmail(email: string): Promise<AuthActionResult> {
+export async function sendVerificationEmail(
+  email: string,
+  next = '/plataforma',
+): Promise<AuthActionResult> {
   const supabase = createClient();
-  const { data, error } = await supabase.auth.resend({ type: 'signup', email });
+  const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
+  const { data, error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo },
+  });
 
   if (error) {
     return { data, error: { message: normalizeAuthError(error.message) } };

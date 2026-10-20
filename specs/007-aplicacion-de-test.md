@@ -8,12 +8,13 @@
 
 ## 1. Objetivo
 
-Implementar la plataforma de realización de test de OposNavarra, permitiendo a los usuarios autenticados y con una suscripción activa practicar preguntas tipo test de las convocatorias a las que tienen acceso.
+Implementar la plataforma de realización de test de OposNavarra, permitiendo a los usuarios autenticados con una suscripción activa, y a las cuentas administradoras autorizadas, practicar preguntas tipo test de las convocatorias a las que tienen acceso.
 
 En este MVP, los usuarios podrán:
 
 - Configurar test personalizados por temas.
-- Seleccionar el número de preguntas y el tiempo disponible.
+- Realizar test de exámenes oficiales completos.
+- Seleccionar el número de preguntas en test por temas y el tiempo disponible.
 - Realizar test con preguntas aleatorias.
 - Guardar automáticamente sus respuestas.
 - Recuperar test en curso.
@@ -44,13 +45,13 @@ La implementación incluirá frontend, lógica de backend y las migraciones nece
 - Revisión de preguntas y respuestas.
 - Historial de test realizados.
 - Creación de tres tablas nuevas en Supabase.
+- Catálogo de exámenes oficiales disponibles.
 - Políticas de seguridad RLS.
 - Migraciones SQL versionadas.
 
 ### 2.2. Fuera del alcance
 
 - Test gratuitos.
-- Test de exámenes oficiales como modalidad independiente.
 - Simulacros preconfigurados.
 - Estadísticas avanzadas.
 - Gráficos de evolución.
@@ -110,22 +111,23 @@ Comportamiento:
 3. La plataforma comprobará si tiene una suscripción activa.
 4. Si tiene una suscripción activa, podrá acceder a las funcionalidades de test.
 5. Si no tiene una suscripción activa, podrá consultar sus resultados históricos y acceder a los planes disponibles.
+6. Las cuentas con `perfiles.rol = 'admin'`, autenticadas y con el correo verificado, podrán acceder a todas las funcionalidades de test sin una suscripción activa. Esta excepción no activa ni simula una suscripción.
 
 ### 4.2. Control de suscripción
 
 Para iniciar o continuar un test será obligatorio:
 
 - Tener una sesión autenticada válida.
-- Tener una suscripción activa y vigente.
+- Tener una suscripción activa y vigente, salvo las cuentas administradoras autorizadas.
 - Cumplir las condiciones de acceso definidas en la spec 006.
 
-La comprobación se realizará en el backend.
+La comprobación se realizará en el backend. La excepción de administración se basará en el rol actual de `public.perfiles`, nunca en datos enviados por el navegador. Los administradores podrán crear, continuar, finalizar y revisar tests conforme a las mismas reglas de contenido publicable; esta excepción no modifica el estado ni los permisos de facturación de su suscripción.
 
 No será suficiente con ocultar funcionalidades desde el frontend.
 
 ### 4.3. Suscripción caducada
 
-Cuando la suscripción deje de estar activa:
+Cuando la suscripción deje de estar activa para una cuenta que no sea administradora:
 
 - No se podrán iniciar nuevos test.
 - No se podrán continuar test pendientes.
@@ -139,7 +141,7 @@ Los resultados históricos permanecerán almacenados.
 
 La lógica de autorización deberá estar centralizada y desacoplada del motor de test.
 
-En el MVP únicamente se permitirá el acceso mediante suscripción activa.
+En el MVP se permitirá el acceso mediante suscripción activa o mediante el rol de administrador autorizado, sin que este último conceda acceso de pago ni modifique las reglas de facturación.
 
 En el futuro podrán incorporarse modalidades gratuitas sin modificar la lógica principal de generación, realización y corrección.
 
@@ -149,11 +151,15 @@ No se añadirán campos ni tablas específicos para test gratuitos en esta versi
 
 ## 5. Pantalla principal
 
-La plataforma tendrá tres apartados principales:
+La plataforma tendrá cuatro apartados principales:
 
-### Crear test
+### Mis tests
 
 Permite configurar y comenzar un nuevo test.
+
+### Test oficiales
+
+Permite seleccionar y realizar un examen oficial publicado.
 
 ### Test en curso
 
@@ -171,9 +177,9 @@ Las convocatorias disponibles se obtendrán del catálogo existente.
 
 ## 6. Configuración del test
 
-### 6.1. Modalidad
+### 6.1. Test por temas
 
-En el MVP solo existirá una modalidad:
+La modalidad de práctica personalizada será:
 
 **Test por temas.**
 
@@ -247,6 +253,18 @@ Antes de iniciar el test se mostrará:
 
 El botón principal será **«Comenzar test»**.
 
+### 6.6. Test oficial
+
+El apartado «Test oficiales» mostrará los exámenes oficiales publicados asociados a convocatorias activas. Cuando un examen esté asociado a más de una convocatoria, el usuario elegirá la convocatoria para aplicar su configuración de penalización.
+
+Solo se ofrecerán exámenes con al menos una pregunta publicable para test. Un test oficial incluirá todas las preguntas asociadas a ese examen que estén publicadas y no anuladas; las preguntas de reserva se incluirán. Todas las preguntas incluidas deberán tener número y cuatro respuestas. El backend rechazará el inicio si el examen o su contenido deja de cumplir esas condiciones.
+
+Las preguntas se presentarán en orden ascendente por su número original, sin selección aleatoria ni posibilidad de elegir cantidad o temas. La cantidad de preguntas se determinará por el contenido elegible del examen.
+
+El usuario podrá elegir el tiempo entre las opciones definidas en el apartado 6.3, cuyo valor inicial será «Sin límite». El límite elegido se aplicará al intento y el backend finalizará automáticamente el test al agotarse.
+
+Los exámenes oficiales utilizarán el mismo guardado automático, recuperación, finalización, corrección, historial y revisión que los test por temas. El intento conservará el examen oficial de origen y la convocatoria elegida, y mostrará esa información en curso, historial y resultados. No se enviarán respuestas correctas al navegador hasta que el intento haya finalizado.
+
 ---
 
 ## 7. Generación del test
@@ -271,6 +289,8 @@ Al pulsar «Comenzar test»:
 La creación del intento y sus relaciones deberá realizarse de forma atómica.
 
 Si ocurre un error, no deberá quedar un test creado parcialmente.
+
+Para un test oficial, el backend validará convocatoria, examen oficial y contenido publicable completo, guardará el examen asociado al intento y persistirá todas sus preguntas ordenadas por su número original.
 
 ### 7.2. Selección de preguntas
 
@@ -474,7 +494,7 @@ Se mostrarán:
 
 ## 11. Revisión del test
 
-El usuario podrá revisar los test finalizados mientras tenga una suscripción activa.
+El usuario podrá revisar los test finalizados mientras tenga una suscripción activa. Las cuentas administradoras autorizadas podrán hacerlo aunque no tengan una suscripción activa.
 
 Se mostrará una pregunta cada vez.
 
@@ -523,7 +543,7 @@ Al seleccionar un test, se abrirá su pantalla de resultados.
 
 El historial seguirá disponible aunque la suscripción haya caducado.
 
-La revisión completa de preguntas requerirá una suscripción activa.
+La revisión completa de preguntas requerirá una suscripción activa, salvo para las cuentas administradoras autorizadas.
 
 ### 12.3. Paginación
 
@@ -556,25 +576,26 @@ Representa cada test iniciado por un usuario.
 
 Campos:
 
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `id` | uuid | Clave primaria |
-| `usuario_id` | uuid | Referencia al usuario |
-| `convocatoria_id` | uuid | Convocatoria |
-| `estado` | text | `en_curso` o `finalizado` |
-| `numero_preguntas` | integer | Cantidad configurada |
-| `tiempo_limite_segundos` | integer nullable | Duración configurada |
-| `iniciado_en` | timestamptz | Fecha de inicio |
-| `expira_en` | timestamptz nullable | Fecha límite |
-| `finalizado_en` | timestamptz nullable | Fecha de finalización |
-| `tiempo_empleado_segundos` | integer nullable | Tiempo empleado |
-| `aciertos` | integer nullable | Respuestas correctas |
-| `fallos` | integer nullable | Respuestas incorrectas |
-| `en_blanco` | integer nullable | Sin responder |
-| `puntuacion_neta` | numeric nullable | Puntuación con penalización |
-| `nota` | numeric nullable | Nota sobre 10 |
-| `porcentaje_aciertos` | numeric nullable | Porcentaje |
-| `penalizacion_aplicada` | numeric nullable | Penalización por error |
+| Campo                      | Tipo                 | Descripción                                        |
+| -------------------------- | -------------------- | -------------------------------------------------- |
+| `id`                       | uuid                 | Clave primaria                                     |
+| `usuario_id`               | uuid                 | Referencia al usuario                              |
+| `convocatoria_id`          | uuid                 | Convocatoria                                       |
+| `examen_id`                | uuid nullable        | Examen oficial de origen; nulo para test por temas |
+| `estado`                   | text                 | `en_curso` o `finalizado`                          |
+| `numero_preguntas`         | integer              | Cantidad configurada                               |
+| `tiempo_limite_segundos`   | integer nullable     | Duración configurada                               |
+| `iniciado_en`              | timestamptz          | Fecha de inicio                                    |
+| `expira_en`                | timestamptz nullable | Fecha límite                                       |
+| `finalizado_en`            | timestamptz nullable | Fecha de finalización                              |
+| `tiempo_empleado_segundos` | integer nullable     | Tiempo empleado                                    |
+| `aciertos`                 | integer nullable     | Respuestas correctas                               |
+| `fallos`                   | integer nullable     | Respuestas incorrectas                             |
+| `en_blanco`                | integer nullable     | Sin responder                                      |
+| `puntuacion_neta`          | numeric nullable     | Puntuación con penalización                        |
+| `nota`                     | numeric nullable     | Nota sobre 10                                      |
+| `porcentaje_aciertos`      | numeric nullable     | Porcentaje                                         |
+| `penalizacion_aplicada`    | numeric nullable     | Penalización por error                             |
 
 Restricciones:
 
@@ -591,10 +612,10 @@ Restricciones:
 
 Almacena los temas seleccionados al crear el test.
 
-| Campo | Tipo | Descripción |
-|---|---|---|
+| Campo             | Tipo | Descripción                  |
+| ----------------- | ---- | ---------------------------- |
 | `test_intento_id` | uuid | Referencia a `test_intentos` |
-| `tema_id` | uuid | Referencia a `temas` |
+| `tema_id`         | uuid | Referencia a `temas`         |
 
 La clave primaria será compuesta:
 
@@ -606,14 +627,14 @@ No se permitirá duplicar un tema dentro del mismo intento.
 
 Almacena las preguntas seleccionadas y las respuestas del usuario.
 
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `id` | uuid | Clave primaria |
-| `test_intento_id` | uuid | Referencia al intento |
-| `pregunta_id` | uuid | Referencia a la pregunta |
-| `orden` | integer | Posición de la pregunta |
-| `respuesta_seleccionada_id` | uuid nullable | Respuesta elegida |
-| `resultado` | text nullable | `correcta`, `incorrecta`, `en_blanco` |
+| Campo                       | Tipo          | Descripción                           |
+| --------------------------- | ------------- | ------------------------------------- |
+| `id`                        | uuid          | Clave primaria                        |
+| `test_intento_id`           | uuid          | Referencia al intento                 |
+| `pregunta_id`               | uuid          | Referencia a la pregunta              |
+| `orden`                     | integer       | Posición de la pregunta               |
+| `respuesta_seleccionada_id` | uuid nullable | Respuesta elegida                     |
+| `resultado`                 | text nullable | `correcta`, `incorrecta`, `en_blanco` |
 
 Restricciones:
 
@@ -630,6 +651,7 @@ Las relaciones deberán garantizar que:
 
 - Un intento pertenece a un usuario.
 - Un intento corresponde a una convocatoria.
+- Un intento oficial conserva el examen de origen; los intentos por temas no tienen examen asociado.
 - Los temas del intento existen.
 - Las preguntas del intento existen.
 - Las respuestas seleccionadas pertenecen a sus preguntas.
@@ -745,6 +767,7 @@ La implementación deberá contemplar:
 - Revisión de test.
 - Historial.
 - Listado de test en curso.
+- Catálogo y configuración de test oficiales.
 
 ### 15.2. Experiencia de usuario
 
@@ -774,6 +797,10 @@ Se implementarán pruebas automatizadas de las reglas de negocio principales.
 - Cantidad insuficiente de preguntas.
 - Preguntas no publicadas.
 - Acceso a convocatorias válidas.
+- Exámenes oficiales asociados a convocatorias activas.
+- Preguntas oficiales completas y ordenadas por número original.
+- Rechazo de exámenes con preguntas incluidas sin número o sin cuatro respuestas.
+- Rechazo de inicios con examen no oficial o no asociado a la convocatoria seleccionada.
 
 ### Realización
 
@@ -816,7 +843,8 @@ Se implementarán pruebas automatizadas de las reglas de negocio principales.
 
 - [ ] El botón «Acceder» permite entrar en la plataforma.
 - [ ] La plataforma requiere autenticación.
-- [ ] Solo los usuarios con suscripción activa pueden iniciar test.
+- [ ] Los usuarios con suscripción activa y las cuentas administradoras autorizadas pueden iniciar test.
+- [ ] La falta de suscripción no limita el acceso de las cuentas administradoras a las funcionalidades de test.
 - [ ] Un usuario sin suscripción puede consultar sus resultados históricos.
 
 ### Configuración
@@ -827,6 +855,10 @@ Se implementarán pruebas automatizadas de las reglas de negocio principales.
 - [ ] Se puede seleccionar el tiempo.
 - [ ] Se muestra el número de preguntas disponibles.
 - [ ] No se pueden generar test con una configuración inválida.
+- [ ] El apartado «Test oficiales» permite seleccionar un examen oficial asociado a una convocatoria activa.
+- [ ] Cada test oficial incluye todas las preguntas publicadas y no anuladas del examen en orden numérico, sin selección de cantidad o temas.
+- [ ] Se puede elegir el límite de tiempo para un test oficial, incluyendo «Sin límite».
+- [ ] Los intentos oficiales guardan y muestran su examen de origen en curso e historial.
 
 ### Realización
 

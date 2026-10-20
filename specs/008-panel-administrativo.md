@@ -46,6 +46,7 @@ La interfaz estará en español y mantendrá las convenciones visuales y de form
 5. Convocatorias y temas
 Los administradores podrán gestionar todos los campos editables definidos en la 002 y activar o desactivar convocatorias y temas.
 Desde el detalle de una convocatoria podrán asociar temas existentes y modificar su numero y orden, ambos enteros positivos y únicos dentro de la convocatoria. La interfaz permitirá reorganizar los temas sin producir duplicados temporales; el guardado de una reorganización será atómico.
+Al crear un tema, se podrá asociar opcionalmente a una convocatoria indicando su número y orden.
 También podrán asociar y desvincular exámenes existentes. No se duplicarán temas ni exámenes para reutilizarlos en otra convocatoria.
 El detalle de un tema mostrará sus convocatorias y permitirá consultar las preguntas asociadas mediante el listado de preguntas.
 Desvincular un tema o un examen no elimina ninguna de esas entidades ni sus preguntas. La interfaz advertirá que cambia la disponibilidad de preguntas para la convocatoria afectada.
@@ -62,6 +63,7 @@ Las reglas de publicación se garantizarán también en la base de datos, incluy
 estado, origen y situacion serán conceptos independientes. Una pregunta anulada podrá publicarse si cumple las condiciones de la 002. No se creará una tabla convocatoria_pregunta.
 Se mostrará que modificar una pregunta reutilizada afecta a todas las convocatorias en las que está disponible.
 8. Usuarios
+El listado mostrará el correo, la fecha de creación de la cuenta y el último inicio de sesión registrado por Supabase Auth, además del rol. Son datos de solo lectura obtenidos de Auth sin duplicarlos en perfiles. Si no existe un inicio de sesión se mostrará «Sin accesos registrados». Las fechas se mostrarán en español con hora de Madrid. La consulta estará restringida a administradores autenticados y verificados, con búsqueda por correo y paginación en el servidor.
 El listado permitirá buscar usuarios por correo y por los datos identificativos existentes en la 003, y filtrar por rol y estado de acceso.
 El detalle mostrará los datos de cuenta pertinentes, el estado de verificación del correo, el rol y el estado de acceso. No mostrará contraseñas, tokens ni secretos.
 Los administradores podrán:
@@ -86,6 +88,7 @@ No se ofrecerán ni implementarán operaciones administrativas para crear, modif
 11. Eliminaciones e integridad
 Las eliminaciones nunca dejarán registros huérfanos ni borrarán contenido reutilizable de forma implícita.
 Las convocatorias, temas y exámenes con dependencias no podrán eliminarse. Las asociaciones se retirarán explícitamente desde sus pantallas cuando proceda. Para convocatorias y temas se ofrecerá la desactivación como alternativa.
+Un tema sin convocatorias, preguntas ni tests asociados podrá eliminarse previa confirmación; si tiene dependencias, la operación será rechazada y se recomendará desactivarlo.
 Eliminar una pregunta podrá eliminar sus propias respuestas y filas de pregunta_tema dentro de la misma operación, pero no sus temas ni su examen. Cualquier otra dependencia impedirá la eliminación. La interfaz recomendará desactivarla cuando se quiera retirarla del uso sin borrarla.
 Las restricciones se garantizarán mediante claves foráneas y reglas del servidor. Si las migraciones existentes permiten cascadas incompatibles con esta spec, se ajustarán mediante una migración nueva.
 12. Migraciones y verificación

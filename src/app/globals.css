@@ -124,7 +124,9 @@ a {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--ink);
-  font: 1rem Arial, sans-serif;
+  font:
+    1rem Arial,
+    sans-serif;
 }
 .auth-password {
   position: relative;

@@ -38,25 +38,38 @@ CREATE TABLE IF NOT EXISTS public.test_intento_temas (
   PRIMARY KEY (test_intento_id, tema_id)
 );
 
+
+ALTER TABLE public.respuestas
+ADD CONSTRAINT respuestas_id_pregunta_id_unique
+UNIQUE (id, pregunta_id);
+
 CREATE TABLE IF NOT EXISTS public.test_intento_preguntas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  test_intento_id uuid NOT NULL REFERENCES public.test_intentos (id) ON DELETE CASCADE,
-  pregunta_id uuid NOT NULL REFERENCES public.preguntas (id) ON DELETE RESTRICT,
-  orden integer NOT NULL CHECK (orden > 0),
-  respuesta_seleccionada_id uuid REFERENCES public.respuestas (id) ON DELETE RESTRICT,
-  resultado text CHECK (resultado IN ('correcta', 'incorrecta', 'en_blanco')),
+
+  test_intento_id uuid NOT NULL
+    REFERENCES public.test_intentos (id)
+    ON DELETE CASCADE,
+
+  pregunta_id uuid NOT NULL
+    REFERENCES public.preguntas (id)
+    ON DELETE RESTRICT,
+
+  orden integer NOT NULL
+    CHECK (orden > 0),
+
+  respuesta_seleccionada_id uuid,
+
+  resultado text
+    CHECK (resultado IN ('correcta', 'incorrecta', 'en_blanco')),
+
   UNIQUE (test_intento_id, pregunta_id),
+
   UNIQUE (test_intento_id, orden),
+
   CONSTRAINT test_intento_preguntas_respuesta_pertenece_a_pregunta
-    CHECK (
-      respuesta_seleccionada_id IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM public.respuestas r
-        WHERE r.id = respuesta_seleccionada_id
-          AND r.pregunta_id = pregunta_id
-      )
-    )
+    FOREIGN KEY (respuesta_seleccionada_id, pregunta_id)
+    REFERENCES public.respuestas (id, pregunta_id)
+    ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS test_intentos_usuario_idx

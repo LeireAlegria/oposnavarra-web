@@ -26,60 +26,56 @@ export type SubscriptionRecord = {
   periodo_fin: string | null;
   cancelar_al_final_del_periodo: boolean;
   cancelacion_solicitada_at: string | null;
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  stripe_status?: string | null;
+  stripe_mode?: 'test' | 'live' | null;
+  payment_issue?: string | null;
+  access_revoked_at?: string | null;
   created_at: string;
   updated_at: string;
 };
 
-const fallbackPlans: SubscriptionPlan[] = [
-  { id: 'fallback-monthly', code: 'mensual', name: 'Mensual', priceCents: 1500, durationMonths: 1, currency: 'EUR', active: true, order: 1, description: 'Acceso mensual para comenzar y mantener una preparación constante.', renewal: 'Automática cada mes' },
-  { id: 'fallback-semester', code: 'semestral', name: 'Semestral', priceCents: 7900, durationMonths: 6, currency: 'EUR', active: true, order: 2, description: 'La opción ideal para seguir una preparación prolongada con continuidad.', renewal: 'Automática cada 6 meses' },
-  { id: 'fallback-annual', code: 'anual', name: 'Anual', priceCents: 12000, durationMonths: 12, currency: 'EUR', active: true, order: 3, description: 'La modalidad más completa para avanzar durante todo el año.', renewal: 'Automática cada año' },
-];
-
 export async function getPublicPlans(): Promise<SubscriptionPlan[]> {
   if (!hasSupabaseConfig()) {
-    return fallbackPlans;
+    throw new Error('El catálogo de planes no está disponible.');
   }
 
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.rpc('listar_planes_activos');
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc('listar_planes_activos');
 
-    if (error || !data) {
-      return fallbackPlans;
-    }
-
-    const planRows = data as Array<{
-      id: string;
-      codigo: string;
-      nombre: string;
-      precio_centimos: number;
-      moneda: string;
-      duracion_meses: number;
-      activo: boolean;
-      orden: number;
-    }>;
-
-    return planRows.map((plan) => ({
-      id: plan.id,
-      code: plan.codigo,
-      name: plan.nombre,
-      priceCents: Number(plan.precio_centimos),
-      durationMonths: Number(plan.duracion_meses),
-      currency: plan.moneda,
-      active: Boolean(plan.activo),
-      order: Number(plan.orden),
-      description: `Acceso ${plan.nombre.toLowerCase()} a todas las convocatorias disponibles.`,
-      renewal:
-        plan.duracion_meses === 1
-          ? 'Automática cada mes'
-          : plan.duracion_meses === 6
-            ? 'Automática cada 6 meses'
-            : 'Automática cada año',
-    }));
-  } catch {
-    return fallbackPlans;
+  if (error || !data) {
+    throw new Error('El catálogo de planes no está disponible.');
   }
+
+  const planRows = data as Array<{
+    id: string;
+    codigo: string;
+    nombre: string;
+    precio_centimos: number;
+    moneda: string;
+    duracion_meses: number;
+    activo: boolean;
+    orden: number;
+  }>;
+
+  return planRows.map((plan) => ({
+    id: plan.id,
+    code: plan.codigo,
+    name: plan.nombre,
+    priceCents: Number(plan.precio_centimos),
+    durationMonths: Number(plan.duracion_meses),
+    currency: plan.moneda,
+    active: Boolean(plan.activo),
+    order: Number(plan.orden),
+    description: `Acceso ${plan.nombre.toLowerCase()} a todas las convocatorias disponibles.`,
+    renewal:
+      plan.duracion_meses === 1
+        ? 'Automática cada mes'
+        : plan.duracion_meses === 6
+          ? 'Automática cada 6 meses'
+          : 'Automática cada año',
+  }));
 }
 
 export async function getCurrentUserSubscription(): Promise<SubscriptionRecord | null> {
@@ -110,7 +106,9 @@ export async function getCurrentUserSubscription(): Promise<SubscriptionRecord |
   }
 }
 
-export async function startPendingSubscription(planId: string): Promise<{ ok: boolean; subscription?: SubscriptionRecord; error?: string }> {
+export async function startPendingSubscription(
+  planId: string,
+): Promise<{ ok: boolean; subscription?: SubscriptionRecord; error?: string }> {
   if (!hasSupabaseConfig()) {
     return { ok: false, error: 'La contratación todavía no está disponible.' };
   }
@@ -142,26 +140,11 @@ export async function startPendingSubscription(planId: string): Promise<{ ok: bo
   }
 }
 
-export async function cancelSubscriptionRenewal(): Promise<{ ok: boolean; error?: string; subscription?: SubscriptionRecord }> {
-  if (!hasSupabaseConfig()) {
-    return { ok: false, error: 'La renovación no está disponible en este momento.' };
-  }
-
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.rpc('cancelar_renovacion');
-
-    if (error) {
-      return { ok: false, error: error.message || 'No se pudo cancelar la renovación.' };
-    }
-
-    return { ok: true, subscription: data as SubscriptionRecord };
-  } catch {
-    return { ok: false, error: 'La renovación no está disponible en este momento.' };
-  }
-}
-
-export async function abandonPendingSubscription(): Promise<{ ok: boolean; error?: string; subscription?: SubscriptionRecord }> {
+export async function abandonPendingSubscription(): Promise<{
+  ok: boolean;
+  error?: string;
+  subscription?: SubscriptionRecord;
+}> {
   if (!hasSupabaseConfig()) {
     return { ok: false, error: 'No hay una contratación pendiente para abandonar.' };
   }
@@ -196,7 +179,7 @@ export async function hasActiveSubscriptionAccess(): Promise<boolean> {
       return false;
     }
 
-    const { data, error } = await supabase.rpc('comprobar_acceso_suscripcion', {
+    const { data, error } = await supabase.rpc('tiene_suscripcion_activa', {
       p_usuario_id: user.id,
     });
 

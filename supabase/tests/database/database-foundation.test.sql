@@ -14,9 +14,23 @@ SELECT has_table('public', 'respuestas');
 SELECT has_table('public', 'pregunta_tema');
 SELECT hasnt_table('public', 'convocatoria_pregunta');
 SELECT is(
-  (SELECT count(*)::integer FROM pg_catalog.pg_tables WHERE schemaname = 'public'),
+  (
+    SELECT count(*)::integer
+    FROM pg_catalog.pg_tables
+    WHERE schemaname = 'public'
+      AND tablename = ANY (ARRAY[
+        'convocatorias',
+        'temas',
+        'convocatoria_tema',
+        'examenes',
+        'convocatoria_examen',
+        'preguntas',
+        'respuestas',
+        'pregunta_tema'
+      ])
+  ),
   8,
-  'el esquema público contiene exactamente ocho tablas de dominio'
+  'la base conserva las ocho tablas del catálogo de convocatorias'
 );
 
 INSERT INTO public.convocatorias (id, nombre)

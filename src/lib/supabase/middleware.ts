@@ -43,6 +43,18 @@ export async function updateSession(request: NextRequest) {
         new URL(`/verificar-correo?email=${encodeURIComponent(user.email ?? '')}`, request.url),
       );
     }
+
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      const { data: profile, error: profileError } = await supabase
+        .from('perfiles')
+        .select('rol')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profileError || !profile || profile.rol !== 'admin') {
+        return NextResponse.redirect(new URL('/plataforma', request.url));
+      }
+    }
   }
 
   if (authPaths.includes(pathname) && user && user.email_confirmed_at) {
