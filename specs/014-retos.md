@@ -124,6 +124,14 @@ El listado de retos diferenciará abiertos y cerrados. Los intentos vinculados a
 
 ## Modelo de datos
 
+### Adaptación al esquema existente
+
+El catálogo de perfiles no contiene un nombre público. En esta implementación cada participante elige un alias visible al crear o unirse (sin correo), conservado en su plaza del reto. No se expone el correo ni se deriva el alias de él.
+
+Se reutilizan `test_intentos`, `test_intento_temas`, `test_intento_preguntas` y las RPC del motor. Se añade la referencia al reto, el motivo de entrega y el resultado calculado. Al cerrar se conserva la representación de la corrección individual en el intento para que las ediciones posteriores del banco no alteren la revisión histórica; `reto_preguntas` solo contiene referencias, sin duplicar el banco.
+
+Las duraciones son las del motor, incluido sin límite. El número admite enteros positivos hasta las preguntas elegibles y la capacidad actual de puntuación (999 preguntas por el tipo `numeric(5,2)` del motor). El vencimiento se resuelve al consultar/operar y mediante una tarea `pg_cron` cada minuto, usando siempre la fecha individual de vencimiento para la corrección y el tiempo empleado.
+
 Los nombres siguientes son propuestos. Antes de implementar se revisarán las migraciones y las tablas reales de la spec 007 para reutilizarlas y adaptar sus nombres, sin duplicar intentos ni respuestas.
 
 ### `retos`

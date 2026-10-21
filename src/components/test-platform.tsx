@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import {
   countAvailableTestQuestions,
@@ -29,6 +30,8 @@ type TestPlatformProps = {
   accountEmail: string;
   accountPanel: ReactNode;
   canPractice: boolean;
+  initialAttemptId?: string;
+  challengeId?: string;
 };
 
 function formatSeconds(seconds: number) {
@@ -64,7 +67,14 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPlatformProps) {
+export function TestPlatform({
+  accountEmail,
+  accountPanel,
+  canPractice,
+  initialAttemptId,
+  challengeId,
+}: TestPlatformProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>(() => (canPractice ? 'crear' : 'resultados'));
   const [convocations, setConvocations] = useState<TestConvocation[]>([]);
   const [officialExams, setOfficialExams] = useState<TestOfficialExam[]>([]);
@@ -96,6 +106,19 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
   const [timeExpired, setTimeExpired] = useState(false);
   const expiredAttemptIdRef = useRef<string | null>(null);
   const selectedConvocation = convocations.find((convocation) => convocation.id === convocationId);
+  useEffect(() => {
+    if (!challengeId || !activeAttempt || activeAttempt.status !== 'in_progress') return;
+    const timer = window.setInterval(() => {
+      void getTestAttempt(activeAttempt.id)
+        .then((attempt) => {
+          if (attempt.status === 'finalized') router.replace(`/retos/${challengeId}`);
+        })
+        .catch(() => {
+          /* Saving and delivery still surface connection errors in the exam UI. */
+        });
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [challengeId, activeAttempt, router]);
   const availableOfficialExams = officialExams.filter(
     (exam) => exam.convocationId === officialConvocationId,
   );
@@ -113,6 +136,24 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     let isCurrent = true;
 
     async function loadPlatform() {
+      if (initialAttemptId && challengeId) {
+        try {
+          const attempt = await getTestAttempt(initialAttemptId);
+          if (!isCurrent) return;
+          if (attempt.status === 'finalized' && !attempt.result) {
+            router.replace('/retos/' + challengeId);
+            return;
+          }
+          setActiveAttempt(attempt);
+          setActiveTab('curso');
+        } catch (error) {
+          if (isCurrent)
+            setErrorMessage(getErrorMessage(error, 'No se pudo recuperar el examen del reto.'));
+        } finally {
+          if (isCurrent) setIsLoading(false);
+        }
+        return;
+      }
       setErrorMessage('');
       setHistoryErrorMessage('');
       setIsLoading(true);
@@ -175,10 +216,10 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     return () => {
       isCurrent = false;
     };
-  }, [canPractice]);
+  }, [canPractice, initialAttemptId, challengeId, router]);
 
   useEffect(() => {
-    if (!canPractice || !convocationId) {
+    if (challengeId || !canPractice || !convocationId) {
       setAvailableQuestions(null);
       return;
     }
@@ -200,7 +241,7 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     return () => {
       isCurrent = false;
     };
-  }, [canPractice, convocationId, topicIds]);
+  }, [canPractice, convocationId, topicIds, challengeId]);
 
   useEffect(() => {
     if (!activeAttempt || activeAttempt.status !== 'in_progress') {
@@ -224,6 +265,12 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
           setIsFinalizingAttempt(true);
           try {
             const finalized = await finalizeTestAttempt(activeAttempt.id);
+
+            if (challengeId) {
+              router.replace(`/retos/${challengeId}`);
+              return;
+            }
+
             setActiveTests((current) =>
               current.filter((attempt) => attempt.id !== activeAttempt.id),
             );
@@ -253,7 +300,7 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     updateClock();
     const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
-  }, [activeAttempt]);
+  }, [activeAttempt, challengeId, router]);
 
   async function refreshHistory(offset: number, append = false) {
     setIsLoadingHistory(true);
@@ -366,6 +413,11 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
       });
       if (!saved) {
         const finalized = await finalizeTestAttempt(activeAttempt.id);
+
+        if (challengeId) {
+          router.replace(`/retos/${challengeId}`);
+          return;
+        }
         setActiveTests((current) => current.filter((attempt) => attempt.id !== activeAttempt.id));
         setActiveAttempt(null);
         setActiveTab('resultados');
@@ -405,6 +457,11 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
     setIsFinalizingAttempt(true);
     try {
       const finalized = await finalizeTestAttempt(activeAttempt.id);
+
+      if (challengeId) {
+        router.replace(`/retos/${challengeId}`);
+        return;
+      }
       setActiveTests((current) => current.filter((attempt) => attempt.id !== activeAttempt.id));
       setActiveAttempt(null);
       setIsFinishConfirmationOpen(false);
@@ -526,12 +583,21 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
             </p>
           </div>
           <nav aria-label="Navegación de la plataforma" className="mt-5 grid gap-1">
-            {[
-              { key: 'crear' as const, label: 'Test por temas', icon: '＋' },
-              { key: 'oficiales' as const, label: 'Test oficiales', icon: '★' },
-              { key: 'curso' as const, label: 'Test en curso', icon: '☷' },
-              { key: 'resultados' as const, label: 'Historial de tests', icon: '▥' },
-            ].map((item) => {
+            <Link
+              href={challengeId ? `/retos/${challengeId}` : '/retos'}
+              className="min-h-11 rounded-lg px-3 py-3 text-sm font-semibold text-[#bd3734]"
+            >
+              {challengeId ? '← Volver al reto' : 'Retos compartidos'}
+            </Link>
+            {(challengeId
+              ? []
+              : [
+                  { key: 'crear' as const, label: 'Test por temas', icon: '＋' },
+                  { key: 'oficiales' as const, label: 'Test oficiales', icon: '★' },
+                  { key: 'curso' as const, label: 'Test en curso', icon: '☷' },
+                  { key: 'resultados' as const, label: 'Historial de tests', icon: '▥' },
+                ]
+            ).map((item) => {
               const isUnavailable = !canPractice && item.key !== 'resultados';
               return (
                 <button
@@ -1052,6 +1118,15 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                     </button>
                   ) : null}
                 </div>
+              ) : activeAttempt.challengeId &&
+                activeAttempt.status === 'finalized' &&
+                !activeAttempt.result ? (
+                <p>
+                  Has terminado el reto. Todavía hay participantes pendientes de finalizar.{' '}
+                  <Link href={`/retos/${activeAttempt.challengeId}`} className="underline">
+                    Ver reto
+                  </Link>
+                </p>
               ) : !canPractice && activeAttempt.status === 'in_progress' ? (
                 <div className="max-w-2xl p-2 sm:p-4">
                   <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
@@ -1346,7 +1421,11 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                               disabled={isSavingAnswer || isFinalizingAttempt}
                               className="min-h-12 w-full rounded-lg border border-[var(--line)] px-4 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
                             >
-                              {isFinalizingAttempt ? 'Finalizando…' : 'Finalizar y ver resultados'}
+                              {isFinalizingAttempt
+                                ? 'Finalizando…'
+                                : challengeId
+                                  ? 'Entregar examen del reto'
+                                  : 'Finalizar y ver resultados'}
                             </button>
                             <p className="mt-3 text-center text-xs leading-5 text-[var(--muted)]">
                               {unansweredCount > 0
@@ -1435,104 +1514,128 @@ export function TestPlatform({ accountEmail, accountPanel, canPractice }: TestPl
                   ) : null}
                 </div>
               ) : (
-                history.map((attempt) => (
-                  <article
-                    key={attempt.id}
-                    className="rounded-2xl border border-[var(--line)] bg-white p-5 shadow-sm sm:p-7"
-                  >
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
-                          Resultado · {formatDate(attempt.startedAt)}
-                        </p>
-                        <h2 className="mt-2 font-serif text-3xl font-normal">
-                          {attempt.result?.porcentajeAciertos ?? 0} %
-                        </h2>
-                        <p className="mt-1 text-sm text-[var(--muted)]">
-                          {attempt.officialExamName ? `${attempt.officialExamName} · ` : ''}
-                          Nota {attempt.result?.nota ?? 0} / 10 · {attempt.questionCount} preguntas
-                        </p>
-                      </div>
+                history.map((attempt) =>
+                  attempt.challengeId && !attempt.result ? (
+                    <article
+                      key={attempt.id}
+                      className="rounded-2xl border border-[var(--line)] bg-white p-5"
+                    >
+                      <p className="text-xs font-semibold text-[#bd3734]">
+                        Reto · {attempt.challengeTitle}
+                      </p>
+                      <p className="mt-3 text-sm">
+                        Has terminado el reto. Todavía hay participantes pendientes de finalizar.
+                      </p>
+                      <Link
+                        href={'/retos/' + attempt.challengeId}
+                        className="mt-3 inline-block text-sm font-semibold underline"
+                      >
+                        Abrir reto
+                      </Link>
+                    </article>
+                  ) : (
+                    <article
+                      key={attempt.id}
+                      className="rounded-2xl border border-[var(--line)] bg-white p-5 shadow-sm sm:p-7"
+                    >
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
+                            {attempt.challengeId ? 'Reto' : 'Resultado'} ·{' '}
+                            {formatDate(attempt.startedAt)}
+                          </p>
+                          <h2 className="mt-2 font-serif text-3xl font-normal">
+                            {attempt.result?.porcentajeAciertos ?? 0} %
+                          </h2>
+                          <p className="mt-1 text-sm text-[var(--muted)]">
+                            {attempt.officialExamName ? `${attempt.officialExamName} · ` : ''}
+                            Nota {attempt.result?.nota ?? 0} / 10 · {attempt.questionCount}{' '}
+                            preguntas
+                          </p>
+                        </div>
 
-                      <div className="flex flex-wrap gap-3">
-                        {canPractice ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleOpenAttempt(attempt)}
-                            disabled={isLoadingAttempt}
-                            className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
-                          >
-                            {isLoadingAttempt ? 'Cargando…' : 'Revisar test'}
-                          </button>
-                        ) : null}
-                        {canPractice ? (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('crear')}
-                            className="min-h-11 rounded-lg bg-[#bd3734] px-4 py-2 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
-                          >
-                            Crear otro test
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-xl bg-[#f8f7f3] p-4">
-                        <p className="text-xs text-[var(--muted)]">Preguntas</p>
-                        <p className="mt-2 text-lg font-semibold">{attempt.questionCount}</p>
-                      </div>
-                      <div className="rounded-xl bg-[#f8f7f3] p-4">
-                        <p className="text-xs text-[var(--muted)]">Aciertos</p>
-                        <p className="mt-2 text-lg font-semibold">
-                          {attempt.result?.aciertos ?? 0}
-                        </p>
-                      </div>
-                      <div className="rounded-xl bg-[#f8f7f3] p-4">
-                        <p className="text-xs text-[var(--muted)]">Fallos</p>
-                        <p className="mt-2 text-lg font-semibold">{attempt.result?.fallos ?? 0}</p>
-                      </div>
-                      <div className="rounded-xl bg-[#f8f7f3] p-4">
-                        <p className="text-xs text-[var(--muted)]">En blanco</p>
-                        <p className="mt-2 text-lg font-semibold">
-                          {attempt.result?.enBlanco ?? 0}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[var(--muted)]">
-                      <p>
-                        <span className="font-medium text-[#302f2b]">Temas: </span>
-                        {attempt.selectedTopics.map((topic) => topic.name).join(', ')}
-                      </p>
-                      <p>
-                        <span className="font-medium text-[#302f2b]">Convocatoria: </span>
-                        {attempt.convocationName}
-                      </p>
-                      <p>
-                        <span className="font-medium text-[#302f2b]">Tiempo: </span>
-                        {formatClock(attempt.result?.tiempoEmpleadoSegundos ?? 0)}
-                      </p>
-                    </div>
-                    {attempt.result?.byTopic.length ? (
-                      <div className="mt-5 border-t border-[var(--line)] pt-4">
-                        <h3 className="text-sm font-semibold">Resultados por tema</h3>
-                        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-                          {attempt.result.byTopic.map((topic) => (
-                            <li
-                              key={topic.topicId}
-                              className="flex items-center justify-between gap-3 rounded-lg bg-[#f8f7f3] px-3 py-2 text-sm"
+                        <div className="flex flex-wrap gap-3">
+                          {canPractice ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenAttempt(attempt)}
+                              disabled={isLoadingAttempt}
+                              className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2 font-sans text-sm font-semibold text-[#302f2b] hover:bg-[#f8f7f3]"
                             >
-                              <span>{topic.topicName}</span>
-                              <span className="shrink-0 font-medium">
-                                {topic.porcentajeAciertos} % · {topic.questionCount} preguntas
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
+                              {isLoadingAttempt ? 'Cargando…' : 'Revisar test'}
+                            </button>
+                          ) : null}
+                          {canPractice ? (
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('crear')}
+                              className="min-h-11 rounded-lg bg-[#bd3734] px-4 py-2 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
+                            >
+                              Crear otro test
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    ) : null}
-                  </article>
-                ))
+
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl bg-[#f8f7f3] p-4">
+                          <p className="text-xs text-[var(--muted)]">Preguntas</p>
+                          <p className="mt-2 text-lg font-semibold">{attempt.questionCount}</p>
+                        </div>
+                        <div className="rounded-xl bg-[#f8f7f3] p-4">
+                          <p className="text-xs text-[var(--muted)]">Aciertos</p>
+                          <p className="mt-2 text-lg font-semibold">
+                            {attempt.result?.aciertos ?? 0}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-[#f8f7f3] p-4">
+                          <p className="text-xs text-[var(--muted)]">Fallos</p>
+                          <p className="mt-2 text-lg font-semibold">
+                            {attempt.result?.fallos ?? 0}
+                          </p>
+                        </div>
+                        <div className="rounded-xl bg-[#f8f7f3] p-4">
+                          <p className="text-xs text-[var(--muted)]">En blanco</p>
+                          <p className="mt-2 text-lg font-semibold">
+                            {attempt.result?.enBlanco ?? 0}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[var(--muted)]">
+                        <p>
+                          <span className="font-medium text-[#302f2b]">Temas: </span>
+                          {attempt.selectedTopics.map((topic) => topic.name).join(', ')}
+                        </p>
+                        <p>
+                          <span className="font-medium text-[#302f2b]">Convocatoria: </span>
+                          {attempt.convocationName}
+                        </p>
+                        <p>
+                          <span className="font-medium text-[#302f2b]">Tiempo: </span>
+                          {formatClock(attempt.result?.tiempoEmpleadoSegundos ?? 0)}
+                        </p>
+                      </div>
+                      {attempt.result?.byTopic.length ? (
+                        <div className="mt-5 border-t border-[var(--line)] pt-4">
+                          <h3 className="text-sm font-semibold">Resultados por tema</h3>
+                          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {attempt.result.byTopic.map((topic) => (
+                              <li
+                                key={topic.topicId}
+                                className="flex items-center justify-between gap-3 rounded-lg bg-[#f8f7f3] px-3 py-2 text-sm"
+                              >
+                                <span>{topic.topicName}</span>
+                                <span className="shrink-0 font-medium">
+                                  {topic.porcentajeAciertos} % · {topic.questionCount} preguntas
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </article>
+                  ),
+                )
               )}
               {historyHasMore ? (
                 <div className="flex flex-wrap justify-center gap-3">

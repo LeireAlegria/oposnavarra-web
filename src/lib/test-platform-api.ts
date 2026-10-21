@@ -41,6 +41,9 @@ const resultSchema = z.object({
 });
 
 const attemptSummarySchema = z.object({
+  challengeId: z.string().uuid().optional(),
+  challengeTitle: z.string().optional(),
+  challengeClosed: z.boolean().optional(),
   id: z.string().uuid(),
   status: z.enum(['in_progress', 'finalized']),
   convocationId: z.string().uuid(),
