@@ -208,14 +208,37 @@ export async function POST(request: Request) {
     });
     if (error) {
       if (!error.code || /^(PGRST00|5)/.test(error.code)) {
-        return NextResponse.json({ message: 'No se pudo recuperar el resultado. Reintenta la misma confirmación para comprobar la operación.', uncertain: true }, { status: 503 });
+        return NextResponse.json(
+          {
+            message:
+              'No se pudo recuperar el resultado. Reintenta la misma confirmación para comprobar la operación.',
+            uncertain: true,
+          },
+          { status: 503 },
+        );
       }
+      const diagnosticCode = /^[A-Z0-9]{5,8}$/.test(error.code) ? error.code : 'UNKNOWN';
+      console.error('[question-import] Confirmation rejected', { code: diagnosticCode });
+      const knownMessages: Record<string, string> = {
+        PGRST202:
+          'La base de datos no tiene disponible la operación de importación. Revisa las migraciones pendientes de Supabase.',
+        '42501':
+          'No tienes permisos para confirmar la importación. Comprueba tu sesión y los permisos de administrador.',
+        '23505':
+          'Se ha encontrado un registro repetido. Si elegiste un examen, comprueba que sus números de pregunta siguen libres y vuelve a revisar el archivo.',
+        '23503':
+          'Una referencia del lote ya no está disponible. Comprueba el examen y los temas seleccionados y vuelve a revisar el archivo.',
+      };
       const safeMessage =
         error.code === '22023' &&
         /^(Fila \d+:|La clave de confirmación|El examen ya no existe)/.test(error.message)
           ? error.message
-          : 'No se pudo importar el lote completo. No se han guardado preguntas parciales. Vuelve a revisar el archivo antes de reintentar.';
-      return NextResponse.json({ message: safeMessage, needsReview: true }, { status: 409 });
+          : (knownMessages[error.code] ??
+            `No se pudo importar el lote completo (código ${diagnosticCode}). La base de datos rechazó la operación y no se han guardado preguntas parciales.`);
+      return NextResponse.json(
+        { message: safeMessage, needsReview: true, errorCode: diagnosticCode },
+        { status: 409 },
+      );
     }
     return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
@@ -226,9 +249,9 @@ export async function POST(request: Request) {
             ? 'La solicitud no es válida. Vuelve a revisar el archivo.'
             : error instanceof TypeError
               ? 'No se pudo procesar la solicitud. Comprueba el archivo y la conexión e inténtalo de nuevo.'
-            : error instanceof Error
-              ? error.message
-              : 'No se pudo procesar el archivo.',
+              : error instanceof Error
+                ? error.message
+                : 'No se pudo procesar el archivo.',
       },
       { status: 400 },
     );
