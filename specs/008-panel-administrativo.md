@@ -82,6 +82,7 @@ Los cambios de precio o duración no modificarán retroactivamente periodos, imp
 Un plan con suscripciones asociadas no podrá eliminarse. Para retirarlo de futuras contrataciones se utilizará su mecanismo de disponibilidad, manteniendo las suscripciones existentes.
 Esta spec no incluye crear precios o productos en Stripe, cambiar cobros ni sincronizar el catálogo con el proveedor. La spec de pasarela de pago deberá integrar ese comportamiento antes de utilizar cambios administrativos de planes en cobros reales.
 10. Suscripciones: solo consulta
+El listado identificará al usuario por su correo de Supabase Auth, consultado mediante la operación administrativa protegida `list_admin_users` únicamente para los usuarios de la página actual. Si la cuenta no dispone de correo se mostrará «Correo no disponible». No se duplicará el correo en suscripciones ni se descargarán todos los perfiles para resolverlo.
 El administrador podrá consultar un listado paginado, buscar por usuario, filtrar por plan y estado y abrir el detalle de cada suscripción.
 Se mostrarán el usuario, el plan, el estado y las fechas y datos de renovación que existan en la 006. No se inventarán campos ni estados adicionales para esta pantalla.
 No se ofrecerán ni implementarán operaciones administrativas para crear, modificar, cancelar o eliminar suscripciones, conceder acceso manual ni ampliar su duración. Esta restricción se aplicará también a peticiones directas al backend.

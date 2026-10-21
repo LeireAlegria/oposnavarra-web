@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { createClient } from '@/lib/supabase/client';
+import { BonImport } from '@/components/bon-import';
+import { QuestionImport } from '@/components/question-import';
+import { ConvocationBlocks } from '@/components/convocation-blocks';
+import { getAdminUserEmails } from '@/lib/admin-user-emails';
 
 type SectionKey =
   | 'resumen'
@@ -76,6 +80,7 @@ type Pregunta = {
   numero?: number | null;
   explicacion?: string | null;
   fuente_url?: string | null;
+  referencia_fuente?: string | null;
   estado?: string;
   origen?: string;
   situacion?: string;
@@ -108,6 +113,7 @@ type Plan = {
 type Suscripcion = {
   id: string;
   usuario_id: string;
+  userEmail?: string | null;
   estado?: string;
   periodo_inicio?: string | null;
   periodo_fin?: string | null;
@@ -186,6 +192,7 @@ function formatUserDate(value: string | null | undefined, fallback: string): str
 export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<SectionKey>('resumen');
+  const [importExamFilter, setImportExamFilter] = useState('');
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -197,7 +204,6 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const [convocatoriaTemas, setConvocatoriaTemas] = useState<ConvocatoriaTema[]>([]);
   const [convocatoriaExamenes, setConvocatoriaExamenes] = useState<ConvocatoriaExamen[]>([]);
   const [managedConvocatoriaId, setManagedConvocatoriaId] = useState<string | null>(null);
-  const [managedTopicRelations, setManagedTopicRelations] = useState<ConvocatoriaTema[]>([]);
   const [managedExamIds, setManagedExamIds] = useState<string[]>([]);
   const [temas, setTemas] = useState<Tema[]>([]);
   const [examenes, setExamenes] = useState<Examen[]>([]);
@@ -317,7 +323,15 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       setPreguntas((preguntasResult.data ?? []) as Pregunta[]);
       setPerfiles((perfilesResult.data ?? []) as Perfil[]);
       setPlanes((planesResult.data ?? []) as Plan[]);
-      setSuscripciones((suscripcionesResult.data ?? []) as Suscripcion[]);
+      const subscriptions = (suscripcionesResult.data ?? []) as Suscripcion[];
+      const { emails, error: emailsError } = await getAdminUserEmails(
+        supabase,
+        subscriptions.map((item) => item.usuario_id),
+      );
+      if (emailsError) throw emailsError;
+      setSuscripciones(
+        subscriptions.map((item) => ({ ...item, userEmail: emails.get(item.usuario_id) })),
+      );
       setStats({
         convocatorias: convocatoriasCountResult.count ?? 0,
         temas: temasCountResult.count ?? 0,
@@ -368,6 +382,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           .order('created_at', { ascending: false });
         if (searchTerm.trim()) request = request.ilike('enunciado', `%${searchTerm.trim()}%`);
         if (activeFilter !== 'todos') request = request.eq('estado', activeFilter);
+        if (importExamFilter) request = request.eq('examen_id', importExamFilter);
         const { data, count, error } = await request.range(from, to);
         if (cancelled) return;
         if (error) {
@@ -414,11 +429,20 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           }
         }
         const { data, count, error } = await request.range(from, to);
+        const subscriptions = (data ?? []) as Suscripcion[];
+        const { emails, error: emailsError } = error
+          ? { emails: new Map<string, string | null>(), error }
+          : await getAdminUserEmails(
+              supabase,
+              subscriptions.map((item) => item.usuario_id),
+            );
         if (cancelled) return;
-        if (error) {
+        if (error || emailsError) {
           setErrorMessage('No se pudo cargar la página de suscripciones. Inténtalo de nuevo.');
         } else {
-          setSuscripciones((data ?? []) as Suscripcion[]);
+          setSuscripciones(
+            subscriptions.map((item) => ({ ...item, userEmail: emails.get(item.usuario_id) })),
+          );
           setRemoteCounts((current) => ({ ...current, suscripciones: count ?? 0 }));
           setErrorMessage('');
         }
@@ -431,7 +455,16 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     return () => {
       cancelled = true;
     };
-  }, [activeFilter, activeSection, currentPage, loading, planFilter, searchTerm, supabase]);
+  }, [
+    activeFilter,
+    activeSection,
+    currentPage,
+    loading,
+    planFilter,
+    searchTerm,
+    supabase,
+    importExamFilter,
+  ]);
 
   async function toggleEntityActive(
     table: 'convocatorias' | 'temas' | 'planes',
@@ -579,9 +612,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       }
       existingRelations = data ?? [];
       if (
-        existingRelations.some(
-          (relation) => relation.numero === numero || relation.orden === orden,
-        )
+        existingRelations.some((relation) => relation.numero === numero || relation.orden === orden)
       ) {
         setErrorMessage('Ese número o posición ya está asignado en la convocatoria.');
         return;
@@ -604,13 +635,10 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       savedTemaId = data.id;
 
       if (topicConvocatoriaId) {
-        const { error: associationError } = await supabase.rpc(
-          'guardar_temas_convocatoria_admin',
-          {
-            p_convocatoria_id: topicConvocatoriaId,
-            p_relaciones: [...existingRelations, { tema_id: savedTemaId, numero, orden }],
-          },
-        );
+        const { error: associationError } = await supabase.rpc('guardar_temas_convocatoria_admin', {
+          p_convocatoria_id: topicConvocatoriaId,
+          p_relaciones: [...existingRelations, { tema_id: savedTemaId, numero, orden }],
+        });
         if (associationError) {
           setErrorMessage(
             'El tema se creó, pero no se pudo vincular. Puedes asociarlo desde la gestión de convocatorias.',
@@ -707,17 +735,36 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     await loadData();
   }
 
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('convocatoria');
+    if (id && convocatorias.some((item) => item.id === id)) {
+      setActiveSection('convocatorias');
+      setSearchTerm(convocatorias.find((item) => item.id === id)?.nombre ?? '');
+      setManagedConvocatoriaId(id);
+      setManagedExamIds(
+        convocatoriaExamenes
+          .filter((item) => item.convocatoria_id === id)
+          .map((item) => item.examen_id),
+      );
+    }
+  }, [convocatorias, convocatoriaExamenes]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('seccion') === 'preguntas') {
+      setActiveSection('preguntas');
+      if (params.get('estado') === 'revision') setActiveFilter('revision');
+      const exam = params.get('examen');
+      if (exam && /^[0-9a-f-]{36}$/i.test(exam)) setImportExamFilter(exam);
+    }
+  }, []);
+
   function openConvocatoriaAssociations(convocatoriaId: string) {
     if (managedConvocatoriaId === convocatoriaId) {
       setManagedConvocatoriaId(null);
       return;
     }
     setManagedConvocatoriaId(convocatoriaId);
-    setManagedTopicRelations(
-      convocatoriaTemas
-        .filter((relation) => relation.convocatoria_id === convocatoriaId)
-        .map(({ tema_id, numero, orden }) => ({ convocatoria_id: convocatoriaId, tema_id, numero, orden })),
-    );
     setManagedExamIds(
       convocatoriaExamenes
         .filter((relation) => relation.convocatoria_id === convocatoriaId)
@@ -727,32 +774,6 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
   async function saveConvocatoriaAssociations() {
     if (!managedConvocatoriaId) return;
-    if (
-      managedTopicRelations.some(
-        (relation) =>
-          !Number.isInteger(relation.numero) ||
-          relation.numero <= 0 ||
-          !Number.isInteger(relation.orden) ||
-          relation.orden <= 0,
-      )
-    ) {
-      setErrorMessage('El número y el orden de cada tema deben ser enteros positivos.');
-      return;
-    }
-
-    const { error: topicsError } = await supabase.rpc('guardar_temas_convocatoria_admin', {
-      p_convocatoria_id: managedConvocatoriaId,
-      p_relaciones: managedTopicRelations.map(({ tema_id, numero, orden }) => ({
-        tema_id,
-        numero,
-        orden,
-      })),
-    });
-    if (topicsError) {
-      setErrorMessage(topicsError.message);
-      return;
-    }
-
     const { error: examsError } = await supabase.rpc('guardar_examenes_convocatoria_admin', {
       p_convocatoria_id: managedConvocatoriaId,
       p_examen_ids: managedExamIds,
@@ -798,19 +819,19 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
       const { error } = await supabase.rpc('guardar_pregunta_admin', {
         p_pregunta_id: editingPreguntaId,
         p_datos: {
-        numero: questionForm.numero ? Number(questionForm.numero) : null,
-        enunciado: questionForm.enunciado.trim(),
-        explicacion: questionForm.explicacion.trim() || null,
-        fuente_url: questionForm.fuente_url.trim() || null,
-        estado: questionForm.estado,
-        origen: questionForm.origen,
-        situacion: questionForm.situacion,
-        examen_id: questionForm.examen_id || null,
+          numero: questionForm.numero ? Number(questionForm.numero) : null,
+          enunciado: questionForm.enunciado.trim(),
+          explicacion: questionForm.explicacion.trim() || null,
+          fuente_url: questionForm.fuente_url.trim() || null,
+          estado: questionForm.estado,
+          origen: questionForm.origen,
+          situacion: questionForm.situacion,
+          examen_id: questionForm.examen_id || null,
         },
         p_respuestas: validAnswers.map((answer) => ({
-        orden: answer.orden,
-        texto: answer.texto.trim(),
-        es_correcta: answer.es_correcta,
+          orden: answer.orden,
+          texto: answer.texto.trim(),
+          es_correcta: answer.es_correcta,
         })),
         p_tema_ids: questionForm.topicIds,
       });
@@ -1181,6 +1202,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
   const renderConvocatorias = () => (
     <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <BonImport topics={temas} onSaved={() => void loadData()} />
       <div className="space-y-3">
         {getPageItems(filteredConvocatorias, currentPage).items.map((item) => (
           <article key={item.id} className="rounded-2xl border border-[#e5e1d8] bg-white p-5">
@@ -1188,184 +1210,87 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               <div>
                 <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
-                  .filter(Boolean)
-                  .join(' · ') || item.descripcion || 'Sin descripción'}
-              </p>
+                  {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
+                    .filter(Boolean)
+                    .join(' · ') ||
+                    item.descripcion ||
+                    'Sin descripción'}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingConvocatoriaId(item.id)}
+                  className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleEntityActive('convocatorias', item.id, Boolean(item.activo))}
+                  className={[
+                    'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
+                    item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
+                  ].join(' ')}
+                >
+                  {item.activo ? 'Activa' : 'Inactiva'}
+                </button>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingConvocatoriaId(item.id)}
-                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-              >
-                Editar
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleEntityActive('convocatorias', item.id, Boolean(item.activo))}
-                className={[
-                  'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                  item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
-                ].join(' ')}
-              >
-                {item.activo ? 'Activa' : 'Inactiva'}
-              </button>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => openConvocatoriaAssociations(item.id)}
-            aria-expanded={managedConvocatoriaId === item.id}
-            className="mt-4 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-          >
-            {managedConvocatoriaId === item.id
-              ? 'Cerrar temas y exámenes'
-              : 'Gestionar temas y exámenes'}
-          </button>
-          {managedConvocatoriaId === item.id ? (
-            <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
-              <section>
-                <h4 className="text-sm font-semibold text-[var(--ink)]">Temas asociados</h4>
-                <div className="mt-3 space-y-2">
-                  {managedTopicRelations.map((relation) => (
-                    <div
-                      key={relation.tema_id}
-                      className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_5rem_auto]"
-                    >
-                      <span className="self-center text-sm">
-                        {temas.find((tema) => tema.id === relation.tema_id)?.nombre ??
-                          'Tema no disponible'}
-                      </span>
-                      <label className="text-xs">
-                        <span className="sr-only">Número</span>
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          aria-label={`Número de ${temas.find((tema) => tema.id === relation.tema_id)?.nombre ?? 'tema'}`}
-                          value={relation.numero}
-                          onChange={(event) =>
-                            setManagedTopicRelations((current) =>
-                              current.map((item) =>
-                                item.tema_id === relation.tema_id
-                                  ? { ...item, numero: Number(event.target.value) }
-                                  : item,
-                              ),
-                            )
-                          }
-                          className="w-full rounded-lg border border-[var(--line)] px-2 py-2"
-                        />
-                      </label>
-                      <label className="text-xs">
-                        <span className="sr-only">Orden</span>
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          aria-label={`Orden de ${temas.find((tema) => tema.id === relation.tema_id)?.nombre ?? 'tema'}`}
-                          value={relation.orden}
-                          onChange={(event) =>
-                            setManagedTopicRelations((current) =>
-                              current.map((item) =>
-                                item.tema_id === relation.tema_id
-                                  ? { ...item, orden: Number(event.target.value) }
-                                  : item,
-                              ),
-                            )
-                          }
-                          className="w-full rounded-lg border border-[var(--line)] px-2 py-2"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setManagedTopicRelations((current) =>
-                            current.filter((item) => item.tema_id !== relation.tema_id),
-                          )
-                        }
-                        className="rounded-lg border border-[var(--line)] px-3 py-2 text-xs"
+            <button
+              type="button"
+              onClick={() => openConvocatoriaAssociations(item.id)}
+              aria-expanded={managedConvocatoriaId === item.id}
+              className="mt-4 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
+            >
+              {managedConvocatoriaId === item.id
+                ? 'Cerrar temas y exámenes'
+                : 'Gestionar temas y exámenes'}
+            </button>
+            {managedConvocatoriaId === item.id ? (
+              <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
+                <ConvocationBlocks
+                  convocationId={item.id}
+                  topics={temas}
+                  onSaved={() => void loadData()}
+                />
+                <section>
+                  <h4 className="text-sm font-semibold text-[var(--ink)]">Exámenes asociados</h4>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {examenes.map((examen) => (
+                      <label
+                        key={examen.id}
+                        className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-xs"
                       >
-                        Quitar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <label className="mt-3 block">
-                  <span className="mb-1 block text-xs font-semibold">Añadir tema existente</span>
-                  <select
-                    value=""
-                    onChange={(event) => {
-                      const temaId = event.target.value;
-                      if (!temaId || managedTopicRelations.some((item) => item.tema_id === temaId))
-                        return;
-                      const nextPosition =
-                        Math.max(0, ...managedTopicRelations.map((relation) => relation.orden)) + 1;
-                      setManagedTopicRelations((current) => [
-                        ...current,
-                        {
-                          convocatoria_id: item.id,
-                          tema_id: temaId,
-                          numero: nextPosition,
-                          orden: nextPosition,
-                        },
-                      ]);
-                    }}
-                    className="w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2"
-                  >
-                    <option value="">Selecciona un tema…</option>
-                    {temas
-                      .filter(
-                        (tema) =>
-                          !managedTopicRelations.some(
-                            (relation) => relation.tema_id === tema.id,
-                          ),
-                      )
-                      .map((tema) => (
-                        <option key={tema.id} value={tema.id}>
-                          {tema.nombre}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              </section>
-              <section>
-                <h4 className="text-sm font-semibold text-[var(--ink)]">Exámenes asociados</h4>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {examenes.map((examen) => (
-                    <label
-                      key={examen.id}
-                      className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-xs"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={managedExamIds.includes(examen.id)}
-                        onChange={(event) =>
-                          setManagedExamIds((current) =>
-                            event.target.checked
-                              ? [...current, examen.id]
-                              : current.filter((id) => id !== examen.id),
-                          )
-                        }
-                      />
-                      {examen.nombre}
-                    </label>
-                  ))}
-                </div>
-              </section>
-              <button
-                type="button"
-                onClick={() => void saveConvocatoriaAssociations()}
-                className="w-full rounded-full bg-[var(--coral)] px-5 py-3 text-sm font-semibold text-white"
-              >
-                Guardar asociaciones
-              </button>
-              <p className="text-xs text-[var(--muted)]">
-                Al retirar una asociación no se elimina el tema, el examen ni sus preguntas.
-              </p>
-            </div>
-          ) : null}
-        </article>
+                        <input
+                          type="checkbox"
+                          checked={managedExamIds.includes(examen.id)}
+                          onChange={(event) =>
+                            setManagedExamIds((current) =>
+                              event.target.checked
+                                ? [...current, examen.id]
+                                : current.filter((id) => id !== examen.id),
+                            )
+                          }
+                        />
+                        {examen.nombre}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                <button
+                  type="button"
+                  onClick={() => void saveConvocatoriaAssociations()}
+                  className="w-full rounded-full bg-[var(--coral)] px-5 py-3 text-sm font-semibold text-white"
+                >
+                  Guardar asociaciones
+                </button>
+                <p className="text-xs text-[var(--muted)]">
+                  Al retirar una asociación no se elimina el tema, el examen ni sus preguntas.
+                </p>
+              </div>
+            ) : null}
+          </article>
         ))}
         {filteredConvocatorias.length === 0 ? (
           <p className="rounded-xl border border-[#e5e1d8] bg-white p-8 text-center text-sm text-[#77756e]">
@@ -1379,7 +1304,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
         onSubmit={saveConvocatoria}
         className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
       >
-        <p className="eyebrow">{editingConvocatoria ? 'Editar convocatoria' : 'Crear convocatoria'}</p>
+        <p className="eyebrow">
+          {editingConvocatoria ? 'Editar convocatoria' : 'Crear convocatoria'}
+        </p>
         <div className="mt-4 space-y-4">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
@@ -1398,11 +1325,19 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             />
           </label>
           {[
-            ['organismo_convocante', 'Organismo convocante', editingConvocatoria?.organismo_convocante],
+            [
+              'organismo_convocante',
+              'Organismo convocante',
+              editingConvocatoria?.organismo_convocante,
+            ],
             ['ambito', 'Ámbito', editingConvocatoria?.ambito],
             ['categoria', 'Categoría', editingConvocatoria?.categoria],
             ['grupo', 'Grupo', editingConvocatoria?.grupo],
-            ['fuente_oficial_url', 'URL de la fuente oficial', editingConvocatoria?.fuente_oficial_url],
+            [
+              'fuente_oficial_url',
+              'URL de la fuente oficial',
+              editingConvocatoria?.fuente_oficial_url,
+            ],
             ['informacion_url', 'URL de información', editingConvocatoria?.informacion_url],
           ].map(([name, label, value]) => (
             <label key={name} className="block">
@@ -1720,6 +1655,22 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
   const renderPreguntas = () => (
     <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <QuestionImport exams={examenes} onSaved={() => void loadData()} />
+      {importExamFilter && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5e1d8] bg-white p-4 xl:col-span-2">
+          <p className="text-sm">
+            Examen:{' '}
+            {examenes.find((exam) => exam.id === importExamFilter)?.nombre ?? 'Examen seleccionado'}
+          </p>
+          <button
+            type="button"
+            className="rounded-lg border px-3 py-2 text-sm"
+            onClick={() => setImportExamFilter('')}
+          >
+            Ver todos los exámenes
+          </button>
+        </div>
+      )}
       <div className="space-y-4">
         {paginatedPreguntas.map((item) => (
           <article
@@ -1731,10 +1682,12 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             </p>
             <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.enunciado}</h3>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              Origen: {item.origen} · Situación: {item.situacion}
+              Origen: {item.origen === 'oficial' ? 'Examen oficial' : 'Propia'} · Situación:{' '}
+              {item.situacion}
             </p>
             <p className="mt-2 text-sm text-[var(--muted)]">
               {item.respuestas?.length ?? 0} respuestas
+              {item.referencia_fuente ? ` · Fuente: ${item.referencia_fuente}` : ''}
             </p>
             <button
               type="button"
@@ -1872,7 +1825,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           </label>
 
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">URL de la fuente</span>
+            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+              URL de la fuente
+            </span>
             <input
               type="url"
               value={questionForm.fuente_url}
@@ -2162,11 +2117,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             importes ya contratados.
           </p>
           <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input
-              type="checkbox"
-              name="activo"
-              defaultChecked={editingPlan?.activo ?? true}
-            />
+            <input type="checkbox" name="activo" defaultChecked={editingPlan?.activo ?? true} />
             Disponible para nuevas contrataciones
           </label>
           {editingPlan ? (
@@ -2196,7 +2147,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           <thead className="bg-[#f8f7f3] text-xs uppercase tracking-wide text-[#77756e]">
             <tr>
               <th scope="col" className="px-5 py-3 font-semibold">
-                Usuario
+                Correo del usuario
               </th>
               <th scope="col" className="px-5 py-3 font-semibold">
                 Plan
@@ -2218,7 +2169,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           <tbody className="divide-y divide-[#eeeae2]">
             {paginatedSubscriptions.map((item) => (
               <tr key={item.id} className="text-[#393833]">
-                <td className="px-5 py-4 font-medium">{item.usuario_id}</td>
+                <td className="max-w-xs break-words px-5 py-4 font-medium">
+                  {item.userEmail || 'Correo no disponible'}
+                </td>
                 <td className="px-5 py-4">{item.planes?.nombre ?? 'Sin plan'}</td>
                 <td className="px-5 py-4">
                   <span className="rounded-full bg-[#f1eee9] px-2.5 py-1 text-xs font-semibold">

@@ -10,6 +10,9 @@ const topicSchema = z.object({
 });
 
 const catalogTopicSchema = topicSchema.extend({
+  blockId: z.string().uuid().optional(),
+  blockName: z.string().default('General'),
+  blockOrder: z.number().int().positive().default(1),
   availableQuestions: z.number().int().nonnegative(),
 });
 
@@ -38,6 +41,9 @@ const resultSchema = z.object({
 });
 
 const attemptSummarySchema = z.object({
+  challengeId: z.string().uuid().optional(),
+  challengeTitle: z.string().optional(),
+  challengeClosed: z.boolean().optional(),
   id: z.string().uuid(),
   status: z.enum(['in_progress', 'finalized']),
   convocationId: z.string().uuid(),

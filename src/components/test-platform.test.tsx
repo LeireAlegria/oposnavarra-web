@@ -17,6 +17,8 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/test-platform-api', () => api);
+const testRouter = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => testRouter }));
 
 import { TestPlatform } from './test-platform';
 
