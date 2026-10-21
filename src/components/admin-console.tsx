@@ -562,6 +562,30 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     }
   }
 
+  async function deleteConvocation(convocation: Convocatoria) {
+    if (
+      !window.confirm(
+        `¿Eliminar la convocatoria "${convocation.nombre}"? Esta acción es permanente. Solo se puede eliminar si no tiene temas, exámenes ni otros registros dependientes.`,
+      )
+    )
+      return;
+    setErrorMessage('');
+    const { error } = await supabase.rpc('eliminar_convocatoria_admin', {
+      p_convocatoria_id: convocation.id,
+    });
+    if (error) {
+      setErrorMessage(
+        error.code === '23503' && error.message.startsWith('No se puede eliminar la convocatoria')
+          ? error.message
+          : 'No se pudo eliminar la convocatoria. Comprueba los permisos y las migraciones de Supabase e inténtalo de nuevo.',
+      );
+      return;
+    }
+    setConvocatorias((current) => current.filter((item) => item.id !== convocation.id));
+    if (managedConvocatoriaId === convocation.id) setManagedConvocatoriaId(null);
+    await loadData();
+  }
+
   async function deleteTema(tema: Tema) {
     if (
       !window.confirm(
@@ -1207,6 +1231,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                   </button>
                 </th>
                 <th scope="col" className="px-5 py-3 font-semibold">
+                  Grupo
+                </th>
+                <th scope="col" className="px-5 py-3 font-semibold">
                   Temas
                 </th>
                 <th scope="col" className="px-5 py-3 font-semibold">
@@ -1231,6 +1258,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                     <p className="mt-1 max-w-sm truncate text-xs text-[#77756e]">
                       {item.descripcion ?? 'Sin descripción'}
                     </p>
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    {item.grupo?.trim() || 'Sin grupo'}
                   </td>
                   <td className="px-5 py-4">{item.convocatoria_tema?.[0]?.count ?? 0}</td>
                   <td className="px-5 py-4">{item.convocatoria_examen?.[0]?.count ?? 0}</td>
@@ -1265,7 +1295,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               ))}
               {filteredConvocatorias.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-sm text-[#77756e]">
+                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-[#77756e]">
                     No hay convocatorias que coincidan con la búsqueda.
                   </td>
                 </tr>
@@ -1315,7 +1345,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           <BonImport topics={temas} onSaved={() => void loadData()} />
           <CatalogTable
             label="Convocatorias"
-            columns={['Convocatoria', 'Temas', 'Exámenes', 'Estado', 'Acciones']}
+            columns={['Convocatoria', 'Grupo', 'Temas', 'Exámenes', 'Estado', 'Acciones']}
             empty={filteredConvocatorias.length === 0}
           >
             {getPageItems(filteredConvocatorias, currentPage).items.map((item) => (
@@ -1324,13 +1354,16 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                   <th scope="row" className="max-w-sm px-5 py-4 font-medium">
                     <p className="break-words">{item.nombre}</p>
                     <p className="mt-1 text-xs font-normal text-[var(--muted)]">
-                      {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
+                      {[item.organismo_convocante, item.ambito, item.categoria]
                         .filter(Boolean)
                         .join(' / ') ||
                         item.descripcion ||
                         'Sin descripción'}
                     </p>
                   </th>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    {item.grupo?.trim() || 'Sin grupo'}
+                  </td>
                   <td className="px-5 py-4">
                     {
                       convocatoriaTemas.filter((relation) => relation.convocatoria_id === item.id)
@@ -1377,12 +1410,19 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                           ? 'Cerrar temas y exámenes'
                           : 'Gestionar temas y exámenes'}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteConvocation(item)}
+                        className="min-h-10 rounded-lg border border-rose-200 px-3 text-xs font-semibold text-rose-700"
+                      >
+                        Eliminar
+                      </button>
                     </div>
                   </td>
                 </tr>
                 {managedConvocatoriaId === item.id ? (
                   <tr>
-                    <td colSpan={5} className="px-5 pb-5">
+                    <td colSpan={6} className="px-5 pb-5">
                       <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
                         <ConvocationBlocks
                           convocationId={item.id}
