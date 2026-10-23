@@ -167,3 +167,41 @@ describe('question import server boundary', () => {
     });
   });
 });
+
+describe('question import diagnostics', () => {
+  it.each([
+    ['PGRST202', 'migraciones'],
+    ['42501', 'permisos'],
+    ['23505', 'repetido'],
+    ['23503', 'referencia'],
+    ['42702', '42702'],
+  ])('returns an actionable and safe diagnostic for %s', async (code, expected) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      api.rpc.mockImplementation(async (name: string) =>
+        name === 'es_admin_actual'
+          ? { data: true, error: null }
+          : {
+              data: null,
+              error: {
+                code,
+                message: 'Private database content',
+                details: 'Private question content',
+              },
+            },
+      );
+      const response = await POST(await request('confirm'));
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body).toMatchObject({
+        needsReview: true,
+        errorCode: code,
+        message: expect.stringContaining(expected),
+      });
+      expect(JSON.stringify(body)).not.toContain('Private');
+      expect(log).toHaveBeenCalledWith('[question-import] Confirmation rejected', { code });
+    } finally {
+      log.mockRestore();
+    }
+  });
+});

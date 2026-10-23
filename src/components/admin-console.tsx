@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { createClient } from '@/lib/supabase/client';
@@ -8,6 +8,51 @@ import { BonImport } from '@/components/bon-import';
 import { QuestionImport } from '@/components/question-import';
 import { ConvocationBlocks } from '@/components/convocation-blocks';
 import { getAdminUserEmails } from '@/lib/admin-user-emails';
+
+function CatalogTable({
+  label,
+  columns,
+  empty,
+  children,
+}: {
+  label: string;
+  columns: string[];
+  empty: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="region"
+      aria-label={label}
+      tabIndex={0}
+      className="overflow-x-auto rounded-2xl border border-[#e5e1d8] bg-white focus-visible:outline-2 focus-visible:outline-[#bd3734]"
+    >
+      <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+        <caption className="sr-only">{label}</caption>
+        <thead className="bg-[#f8f7f3] text-xs uppercase tracking-wide text-[#77756e]">
+          <tr>
+            {columns.map((column) => (
+              <th key={column} scope="col" className="px-5 py-4 font-semibold">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#e5e1d8]">
+          {empty ? (
+            <tr>
+              <td colSpan={columns.length} className="px-5 py-10 text-center text-[#77756e]">
+                No hay resultados. Prueba otra búsqueda o crea un registro.
+              </td>
+            </tr>
+          ) : (
+            children
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 type SectionKey =
   | 'resumen'
@@ -224,8 +269,12 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const [remoteCounts, setRemoteCounts] = useState({ preguntas: 0, usuarios: 0, suscripciones: 0 });
   const [errorMessage, setErrorMessage] = useState('');
   const [questionForm, setQuestionForm] = useState<QuestionForm>(emptyQuestionForm);
+  const [catalogView, setCatalogView] = useState<'list' | 'form'>('list');
+  const catalogHeadingRef = useRef<HTMLHeadingElement>(null);
   const [editingConvocatoriaId, setEditingConvocatoriaId] = useState<string | null>(null);
   const [editingTemaId, setEditingTemaId] = useState<string | null>(null);
+  const topicNameRef = useRef<HTMLInputElement>(null);
+  const [topicConvocationFilter, setTopicConvocationFilter] = useState('all');
   const [topicConvocatoriaId, setTopicConvocatoriaId] = useState('');
   const [topicNumero, setTopicNumero] = useState('1');
   const [topicOrden, setTopicOrden] = useState('1');
@@ -570,6 +619,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
     form.reset();
     setEditingConvocatoriaId(null);
+    setCatalogView('list');
+    requestAnimationFrame(() => catalogHeadingRef.current?.focus());
     await loadData();
   }
 
@@ -652,6 +703,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     setTopicNumero('1');
     setTopicOrden('1');
     setEditingTemaId(null);
+    setCatalogView('list');
+    requestAnimationFrame(() => catalogHeadingRef.current?.focus());
     await loadData();
   }
 
@@ -685,6 +738,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
     form.reset();
     setEditingExamenId(null);
+    setCatalogView('list');
+    requestAnimationFrame(() => catalogHeadingRef.current?.focus());
     await loadData();
   }
 
@@ -839,6 +894,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
 
       setQuestionForm(emptyQuestionForm);
       setEditingPreguntaId(null);
+      setCatalogView('list');
+      requestAnimationFrame(() => catalogHeadingRef.current?.focus());
       await loadData();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo guardar la pregunta.';
@@ -888,6 +945,15 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const filteredTemas = useMemo(
     () =>
       temas
+        .filter((item) => {
+          const relations = convocatoriaTemas.filter((relation) => relation.tema_id === item.id);
+          return (
+            topicConvocationFilter === 'all' ||
+            (topicConvocationFilter === 'unassigned'
+              ? relations.length === 0
+              : relations.some((relation) => relation.convocatoria_id === topicConvocationFilter))
+          );
+        })
         .filter((item) =>
           `${item.nombre} ${item.descripcion ?? ''}`
             .toLocaleLowerCase('es')
@@ -899,7 +965,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             activeFilter === 'todos' ||
             String(Boolean(item.activo)) === activeFilter,
         ),
-    [activeFilter, activeSection, searchTerm, temas],
+    [activeFilter, activeSection, searchTerm, temas, convocatoriaTemas, topicConvocationFilter],
   );
   const filteredExamenes = useMemo(
     () =>
@@ -1019,6 +1085,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const editingPlan = planes.find((item) => item.id === editingPlanId);
 
   const changeSection = (section: SectionKey) => {
+    setCatalogView('list');
+    setErrorMessage('');
     setActiveSection(section);
     setSearchTerm('');
     setActiveFilter('todos');
@@ -1026,6 +1094,46 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
     setCurrentPage(1);
     setIsMobileNavigationOpen(false);
   };
+
+  const openCatalogForm = (section: SectionKey, id: string | null = null) => {
+    if (section !== activeSection) changeSection(section);
+    setEditingConvocatoriaId(section === 'convocatorias' ? id : null);
+    setEditingTemaId(section === 'temas' ? id : null);
+    setEditingExamenId(section === 'examenes' ? id : null);
+    setEditingPreguntaId(section === 'preguntas' ? id : null);
+    if (section === 'preguntas' && !id) setQuestionForm(emptyQuestionForm);
+    setTopicConvocatoriaId('');
+    setTopicNumero('1');
+    setTopicOrden('1');
+    setErrorMessage('');
+    setCatalogView('form');
+    requestAnimationFrame(() => catalogHeadingRef.current?.focus());
+  };
+  const closeCatalogForm = () => {
+    setCatalogView('list');
+    setEditingConvocatoriaId(null);
+    setEditingTemaId(null);
+    setEditingExamenId(null);
+    setEditingPreguntaId(null);
+    setQuestionForm(emptyQuestionForm);
+    setErrorMessage('');
+    requestAnimationFrame(() => catalogHeadingRef.current?.focus());
+  };
+  const isCatalogSection = ['convocatorias', 'temas', 'examenes', 'preguntas'].includes(
+    activeSection,
+  );
+  const isCatalogForm = isCatalogSection && catalogView === 'form';
+  const catalogEntityLabel =
+    activeSection === 'convocatorias'
+      ? 'convocatoria'
+      : activeSection === 'temas'
+        ? 'tema'
+        : activeSection === 'preguntas'
+          ? 'pregunta'
+          : 'examen';
+  const isEditingCatalog = Boolean(
+    editingConvocatoriaId || editingTemaId || editingExamenId || editingPreguntaId,
+  );
 
   const renderResumen = () => (
     <div className="space-y-6">
@@ -1059,7 +1167,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           </div>
           <button
             type="button"
-            onClick={() => changeSection('convocatorias')}
+            onClick={() => openCatalogForm('convocatorias')}
             className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
           >
             + Nueva convocatoria
@@ -1078,7 +1186,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           />
           <button
             type="button"
-            onClick={() => changeSection('examenes')}
+            onClick={() => openCatalogForm('examenes')}
             className="min-h-11 rounded-lg border border-[#d8d2c8] px-4 font-sans text-sm font-semibold text-[#393833] hover:bg-[#f8f7f3]"
           >
             Crear examen
@@ -1201,802 +1309,907 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   );
 
   const renderConvocatorias = () => (
-    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <BonImport topics={temas} onSaved={() => void loadData()} />
-      <div className="space-y-3">
-        {getPageItems(filteredConvocatorias, currentPage).items.map((item) => (
-          <article key={item.id} className="rounded-2xl border border-[#e5e1d8] bg-white p-5">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
-                <p className="mt-1 text-sm text-[var(--muted)]">
-                  {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
-                    .filter(Boolean)
-                    .join(' · ') ||
-                    item.descripcion ||
-                    'Sin descripción'}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingConvocatoriaId(item.id)}
-                  className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-                >
-                  Editar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleEntityActive('convocatorias', item.id, Boolean(item.activo))}
-                  className={[
-                    'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                    item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
-                  ].join(' ')}
-                >
-                  {item.activo ? 'Activa' : 'Inactiva'}
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => openConvocatoriaAssociations(item.id)}
-              aria-expanded={managedConvocatoriaId === item.id}
-              className="mt-4 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-            >
-              {managedConvocatoriaId === item.id
-                ? 'Cerrar temas y exámenes'
-                : 'Gestionar temas y exámenes'}
-            </button>
-            {managedConvocatoriaId === item.id ? (
-              <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
-                <ConvocationBlocks
-                  convocationId={item.id}
-                  topics={temas}
-                  onSaved={() => void loadData()}
-                />
-                <section>
-                  <h4 className="text-sm font-semibold text-[var(--ink)]">Exámenes asociados</h4>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {examenes.map((examen) => (
-                      <label
-                        key={examen.id}
-                        className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-xs"
+    <div className="space-y-6">
+      {catalogView === 'list' ? (
+        <>
+          <BonImport topics={temas} onSaved={() => void loadData()} />
+          <CatalogTable
+            label="Convocatorias"
+            columns={['Convocatoria', 'Temas', 'Exámenes', 'Estado', 'Acciones']}
+            empty={filteredConvocatorias.length === 0}
+          >
+            {getPageItems(filteredConvocatorias, currentPage).items.map((item) => (
+              <Fragment key={item.id}>
+                <tr className="align-top hover:bg-[#fdfcf9]">
+                  <th scope="row" className="max-w-sm px-5 py-4 font-medium">
+                    <p className="break-words">{item.nombre}</p>
+                    <p className="mt-1 text-xs font-normal text-[var(--muted)]">
+                      {[item.organismo_convocante, item.ambito, item.categoria, item.grupo]
+                        .filter(Boolean)
+                        .join(' / ') ||
+                        item.descripcion ||
+                        'Sin descripción'}
+                    </p>
+                  </th>
+                  <td className="px-5 py-4">
+                    {
+                      convocatoriaTemas.filter((relation) => relation.convocatoria_id === item.id)
+                        .length
+                    }
+                  </td>
+                  <td className="px-5 py-4">
+                    {
+                      convocatoriaExamenes.filter(
+                        (relation) => relation.convocatoria_id === item.id,
+                      ).length
+                    }
+                  </td>
+                  <td className="px-5 py-4">
+                    <span className={item.activo ? 'text-emerald-700' : 'text-slate-600'}>
+                      {item.activo ? 'Activa' : 'Inactiva'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openCatalogForm('convocatorias', item.id)}
+                        className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
                       >
-                        <input
-                          type="checkbox"
-                          checked={managedExamIds.includes(examen.id)}
-                          onChange={(event) =>
-                            setManagedExamIds((current) =>
-                              event.target.checked
-                                ? [...current, examen.id]
-                                : current.filter((id) => id !== examen.id),
-                            )
-                          }
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          toggleEntityActive('convocatorias', item.id, Boolean(item.activo))
+                        }
+                        className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                      >
+                        {item.activo ? 'Desactivar' : 'Activar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openConvocatoriaAssociations(item.id)}
+                        aria-expanded={managedConvocatoriaId === item.id}
+                        className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                      >
+                        {managedConvocatoriaId === item.id
+                          ? 'Cerrar temas y exámenes'
+                          : 'Gestionar temas y exámenes'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {managedConvocatoriaId === item.id ? (
+                  <tr>
+                    <td colSpan={5} className="px-5 pb-5">
+                      <div className="mt-4 space-y-5 border-t border-[var(--line)] pt-4">
+                        <ConvocationBlocks
+                          convocationId={item.id}
+                          topics={temas}
+                          onSaved={() => void loadData()}
                         />
-                        {examen.nombre}
-                      </label>
-                    ))}
-                  </div>
-                </section>
-                <button
-                  type="button"
-                  onClick={() => void saveConvocatoriaAssociations()}
-                  className="w-full rounded-full bg-[var(--coral)] px-5 py-3 text-sm font-semibold text-white"
-                >
-                  Guardar asociaciones
-                </button>
-                <p className="text-xs text-[var(--muted)]">
-                  Al retirar una asociación no se elimina el tema, el examen ni sus preguntas.
-                </p>
-              </div>
-            ) : null}
-          </article>
-        ))}
-        {filteredConvocatorias.length === 0 ? (
-          <p className="rounded-xl border border-[#e5e1d8] bg-white p-8 text-center text-sm text-[#77756e]">
-            No hay convocatorias que coincidan con la búsqueda.
+                        <section>
+                          <h4 className="text-sm font-semibold text-[var(--ink)]">
+                            Exámenes asociados
+                          </h4>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {examenes.map((examen) => (
+                              <label
+                                key={examen.id}
+                                className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-xs"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={managedExamIds.includes(examen.id)}
+                                  onChange={(event) =>
+                                    setManagedExamIds((current) =>
+                                      event.target.checked
+                                        ? [...current, examen.id]
+                                        : current.filter((id) => id !== examen.id),
+                                    )
+                                  }
+                                />
+                                {examen.nombre}
+                              </label>
+                            ))}
+                          </div>
+                        </section>
+                        <button
+                          type="button"
+                          onClick={() => void saveConvocatoriaAssociations()}
+                          className="w-full rounded-full bg-[var(--coral)] px-5 py-3 text-sm font-semibold text-white"
+                        >
+                          Guardar asociaciones
+                        </button>
+                        <p className="text-xs text-[var(--muted)]">
+                          Al retirar una asociación no se elimina el tema, el examen ni sus
+                          preguntas.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            ))}
+          </CatalogTable>
+        </>
+      ) : (
+        <form
+          key={`convocatoria-${editingConvocatoriaId ?? 'new'}`}
+          onSubmit={saveConvocatoria}
+          className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--line)] bg-white p-5 sm:p-8"
+        >
+          <p className="eyebrow">
+            {editingConvocatoria ? 'Editar convocatoria' : 'Crear convocatoria'}
           </p>
-        ) : null}
-      </div>
-
-      <form
-        key={`convocatoria-${editingConvocatoriaId ?? 'new'}`}
-        onSubmit={saveConvocatoria}
-        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-      >
-        <p className="eyebrow">
-          {editingConvocatoria ? 'Editar convocatoria' : 'Crear convocatoria'}
-        </p>
-        <div className="mt-4 space-y-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
-            <input
-              name="nombre"
-              defaultValue={editingConvocatoria?.nombre ?? ''}
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
-            <textarea
-              name="descripcion"
-              defaultValue={editingConvocatoria?.descripcion ?? ''}
-              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          {[
-            [
-              'organismo_convocante',
-              'Organismo convocante',
-              editingConvocatoria?.organismo_convocante,
-            ],
-            ['ambito', 'Ámbito', editingConvocatoria?.ambito],
-            ['categoria', 'Categoría', editingConvocatoria?.categoria],
-            ['grupo', 'Grupo', editingConvocatoria?.grupo],
-            [
-              'fuente_oficial_url',
-              'URL de la fuente oficial',
-              editingConvocatoria?.fuente_oficial_url,
-            ],
-            ['informacion_url', 'URL de información', editingConvocatoria?.informacion_url],
-          ].map(([name, label, value]) => (
-            <label key={name} className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+          <div className="mt-4 space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
               <input
-                name={name ?? undefined}
-                type={String(name).endsWith('_url') ? 'url' : 'text'}
-                defaultValue={value ?? ''}
+                name="nombre"
+                defaultValue={editingConvocatoria?.nombre ?? ''}
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
               />
             </label>
-          ))}
-          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input
-              type="checkbox"
-              name="activo"
-              defaultChecked={editingConvocatoria?.activo ?? true}
-            />
-            Activa
-          </label>
-          {editingConvocatoria ? (
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                Descripción
+              </span>
+              <textarea
+                name="descripcion"
+                defaultValue={editingConvocatoria?.descripcion ?? ''}
+                className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+            {[
+              [
+                'organismo_convocante',
+                'Organismo convocante',
+                editingConvocatoria?.organismo_convocante,
+              ],
+              ['ambito', 'Ámbito', editingConvocatoria?.ambito],
+              ['categoria', 'Categoría', editingConvocatoria?.categoria],
+              ['grupo', 'Grupo', editingConvocatoria?.grupo],
+              [
+                'fuente_oficial_url',
+                'URL de la fuente oficial',
+                editingConvocatoria?.fuente_oficial_url,
+              ],
+              ['informacion_url', 'URL de información', editingConvocatoria?.informacion_url],
+            ].map(([name, label, value]) => (
+              <label key={name} className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+                <input
+                  name={name ?? undefined}
+                  type={String(name).endsWith('_url') ? 'url' : 'text'}
+                  defaultValue={value ?? ''}
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                />
+              </label>
+            ))}
+            <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+              <input
+                type="checkbox"
+                name="activo"
+                defaultChecked={editingConvocatoria?.activo ?? true}
+              />
+              Activa
+            </label>
             <button
               type="button"
-              onClick={() => setEditingConvocatoriaId(null)}
+              onClick={closeCatalogForm}
               className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Cancelar edición
+              Cancelar
             </button>
-          ) : null}
-          <button
-            type="submit"
-            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-          >
-            {editingConvocatoria ? 'Guardar cambios' : 'Guardar convocatoria'}
-          </button>
-        </div>
-      </form>
+            <button
+              type="submit"
+              className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+            >
+              {editingConvocatoria ? 'Guardar cambios' : 'Guardar convocatoria'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 
   const renderTemas = () => (
-    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <div className="space-y-4">
-        {paginatedTemas.map((item) => (
-          <article
-            key={item.id}
-            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
-                <p className="mt-1 text-sm text-[var(--muted)]">
-                  {item.descripcion ?? 'Sin descripción'}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTopicConvocatoriaId('');
-                    setEditingTemaId(item.id);
-                  }}
-                  className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-                >
-                  Editar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleEntityActive('temas', item.id, Boolean(item.activo))}
-                  className={[
-                    'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                    item.activo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700',
-                  ].join(' ')}
-                >
-                  {item.activo ? 'Activo' : 'Inactivo'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void deleteTema(item)}
-                  className="rounded-full border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <form
-        key={`tema-${editingTemaId ?? 'new'}`}
-        onSubmit={saveTema}
-        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-      >
-        <p className="eyebrow">{editingTema ? 'Editar tema' : 'Crear tema'}</p>
-        <div className="mt-4 space-y-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
-            <input
-              name="nombre"
-              defaultValue={editingTema?.nombre ?? ''}
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
-            <textarea
-              name="descripcion"
-              defaultValue={editingTema?.descripcion ?? ''}
-              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          {!editingTema ? (
-            <>
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
-                  Convocatoria (opcional)
-                </span>
-                <select
-                  name="convocatoria_id"
-                  value={topicConvocatoriaId}
-                  onChange={(event) => {
-                    const convocatoriaId = event.target.value;
-                    const relations = convocatoriaTemas.filter(
-                      (relation) => relation.convocatoria_id === convocatoriaId,
-                    );
-                    setTopicConvocatoriaId(convocatoriaId);
-                    setTopicNumero(
-                      String(Math.max(0, ...relations.map((relation) => relation.numero)) + 1),
-                    );
-                    setTopicOrden(
-                      String(Math.max(0, ...relations.map((relation) => relation.orden)) + 1),
-                    );
-                  }}
-                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-                >
-                  <option value="">Sin convocatoria asociada</option>
-                  {convocatorias.map((convocatoria) => (
-                    <option key={convocatoria.id} value={convocatoria.id}>
-                      {convocatoria.nombre}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {topicConvocatoriaId ? (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
-                      Número del tema
+    <div className="space-y-6">
+      {catalogView === 'list' ? (
+        <>
+          <div className="min-w-0 space-y-3">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold">Filtrar por convocatoria</span>
+              <select
+                value={topicConvocationFilter}
+                onChange={(event) => {
+                  setTopicConvocationFilter(event.target.value);
+                  setCurrentPage(1);
+                }}
+                className="min-h-11 w-full rounded-xl border border-[var(--line)] bg-white px-3 text-sm"
+              >
+                <option value="all">Todas las convocatorias</option>
+                <option value="unassigned">Sin convocatoria</option>
+                {convocatorias.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <CatalogTable
+              label="Temas"
+              columns={['Tema', 'Convocatorias', 'Estado', 'Acciones']}
+              empty={paginatedTemas.length === 0}
+            >
+              {paginatedTemas.map((item) => (
+                <tr key={item.id} className="align-top hover:bg-[#fdfcf9]">
+                  <th scope="row" className="max-w-sm px-5 py-4 font-medium">
+                    <p className="break-words">{item.nombre}</p>
+                    {item.descripcion ? (
+                      <details className="mt-2 text-xs font-normal text-[var(--muted)]">
+                        <summary className="cursor-pointer py-2">Ver descripción</summary>
+                        <p className="whitespace-pre-wrap break-words">{item.descripcion}</p>
+                      </details>
+                    ) : (
+                      <p className="mt-1 text-xs font-normal text-[var(--muted)]">
+                        Sin descripción
+                      </p>
+                    )}
+                  </th>
+                  <td className="max-w-xs px-5 py-4 text-xs text-[var(--muted)]">
+                    {convocatorias
+                      .filter((convocation) =>
+                        convocatoriaTemas.some(
+                          (relation) =>
+                            relation.tema_id === item.id &&
+                            relation.convocatoria_id === convocation.id,
+                        ),
+                      )
+                      .map((convocation) => convocation.nombre)
+                      .join(' / ') || 'Sin convocatoria asociada'}
+                  </td>
+                  <td className="px-5 py-4">
+                    <span className={item.activo ? 'text-emerald-700' : 'text-slate-600'}>
+                      {item.activo ? 'Activo' : 'Inactivo'}
                     </span>
-                    <input
-                      name="numero"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      value={topicNumero}
-                      onChange={(event) => setTopicNumero(event.target.value)}
-                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
-                      Orden
-                    </span>
-                    <input
-                      name="orden"
-                      type="number"
-                      min="1"
-                      step="1"
-                      required
-                      value={topicOrden}
-                      onChange={(event) => setTopicOrden(event.target.value)}
-                      className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input type="checkbox" name="activo" defaultChecked={editingTema?.activo ?? true} />
-            Activo
-          </label>
-          {editingTema ? (
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openCatalogForm('temas', item.id)}
+                        className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleEntityActive('temas', item.id, Boolean(item.activo))}
+                        className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                      >
+                        {item.activo ? 'Desactivar' : 'Activar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteTema(item)}
+                        className="min-h-10 rounded-lg border border-rose-200 px-3 text-xs font-semibold text-rose-700"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </CatalogTable>
+          </div>
+        </>
+      ) : (
+        <form
+          key={`tema-${editingTemaId ?? 'new'}`}
+          onSubmit={saveTema}
+          aria-label={editingTema ? 'Editar tema' : 'Crear tema'}
+          className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--line)] bg-white p-5 sm:p-8"
+        >
+          <p className="eyebrow">{editingTema ? 'Editar tema' : 'Crear tema'}</p>
+          <div className="mt-4 space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
+              <input
+                ref={topicNameRef}
+                required
+                name="nombre"
+                defaultValue={editingTema?.nombre ?? ''}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                Descripción
+              </span>
+              <textarea
+                name="descripcion"
+                defaultValue={editingTema?.descripcion ?? ''}
+                className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+            {!editingTema ? (
+              <>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                    Convocatoria (opcional)
+                  </span>
+                  <select
+                    name="convocatoria_id"
+                    value={topicConvocatoriaId}
+                    onChange={(event) => {
+                      const convocatoriaId = event.target.value;
+                      const relations = convocatoriaTemas.filter(
+                        (relation) => relation.convocatoria_id === convocatoriaId,
+                      );
+                      setTopicConvocatoriaId(convocatoriaId);
+                      setTopicNumero(
+                        String(Math.max(0, ...relations.map((relation) => relation.numero)) + 1),
+                      );
+                      setTopicOrden(
+                        String(Math.max(0, ...relations.map((relation) => relation.orden)) + 1),
+                      );
+                    }}
+                    className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                  >
+                    <option value="">Sin convocatoria asociada</option>
+                    {convocatorias.map((convocatoria) => (
+                      <option key={convocatoria.id} value={convocatoria.id}>
+                        {convocatoria.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {topicConvocatoriaId ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                        Número del tema
+                      </span>
+                      <input
+                        name="numero"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        value={topicNumero}
+                        onChange={(event) => setTopicNumero(event.target.value)}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                        Orden
+                      </span>
+                      <input
+                        name="orden"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        value={topicOrden}
+                        onChange={(event) => setTopicOrden(event.target.value)}
+                        className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+              <input type="checkbox" name="activo" defaultChecked={editingTema?.activo ?? true} />
+              Activo
+            </label>
             <button
               type="button"
-              onClick={() => {
-                setTopicConvocatoriaId('');
-                setEditingTemaId(null);
-              }}
+              onClick={closeCatalogForm}
               className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Cancelar edición
+              Cancelar
             </button>
-          ) : null}
-          <button
-            type="submit"
-            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-          >
-            {editingTema ? 'Guardar cambios' : 'Guardar tema'}
-          </button>
-        </div>
-      </form>
+            <button
+              type="submit"
+              className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+            >
+              {editingTema ? 'Guardar cambios' : 'Guardar tema'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 
   const renderExamenes = () => (
-    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <div className="space-y-4">
-        {paginatedExamenes.map((item) => (
-          <article
-            key={item.id}
-            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
+    <div className="space-y-6">
+      {catalogView === 'list' ? (
+        <>
+          <CatalogTable
+            label="Exámenes"
+            columns={['Examen', 'Fecha', 'Tipo', 'Acciones']}
+            empty={paginatedExamenes.length === 0}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-semibold text-[var(--ink)]">{item.nombre}</h3>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  {item.fecha ?? 'Sin fecha'} · {item.es_oficial ? 'Oficial' : 'No oficial'}
-                </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  {item.descripcion ?? 'Sin descripción'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingExamenId(item.id)}
-                className="rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-              >
-                Editar
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <form
-        key={`examen-${editingExamenId ?? 'new'}`}
-        onSubmit={saveExamen}
-        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-      >
-        <p className="eyebrow">{editingExamen ? 'Editar examen' : 'Crear examen'}</p>
-        <div className="mt-4 space-y-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
-            <input
-              name="nombre"
-              defaultValue={editingExamen?.nombre ?? ''}
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Fecha</span>
-            <input
-              name="fecha"
-              type="date"
-              defaultValue={editingExamen?.fecha ?? ''}
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Descripción</span>
-            <textarea
-              name="descripcion"
-              defaultValue={editingExamen?.descripcion ?? ''}
-              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-          {[
-            ['url_examen', 'URL del examen', editingExamen?.url_examen],
-            [
-              'url_plantilla_respuestas',
-              'URL de la plantilla de respuestas',
-              editingExamen?.url_plantilla_respuestas,
-            ],
-          ].map(([name, label, value]) => (
-            <label key={name} className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+            {paginatedExamenes.map((item) => (
+              <tr key={item.id} className="align-top hover:bg-[#fdfcf9]">
+                <th scope="row" className="max-w-md px-5 py-4 font-medium">
+                  <p className="break-words">{item.nombre}</p>
+                  <p className="mt-1 text-xs font-normal text-[var(--muted)]">
+                    {item.descripcion || 'Sin descripción'}
+                  </p>
+                </th>
+                <td className="whitespace-nowrap px-5 py-4">
+                  {item.fecha
+                    ? new Intl.DateTimeFormat('es-ES').format(new Date(item.fecha + 'T12:00:00'))
+                    : 'Sin fecha'}
+                </td>
+                <td className="px-5 py-4">{item.es_oficial ? 'Oficial' : 'No oficial'}</td>
+                <td className="px-5 py-4">
+                  <button
+                    type="button"
+                    onClick={() => openCatalogForm('examenes', item.id)}
+                    className="min-h-10 rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                  >
+                    Editar
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </CatalogTable>
+        </>
+      ) : (
+        <form
+          key={`examen-${editingExamenId ?? 'new'}`}
+          onSubmit={saveExamen}
+          className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--line)] bg-white p-5 sm:p-8"
+        >
+          <p className="eyebrow">{editingExamen ? 'Editar examen' : 'Crear examen'}</p>
+          <div className="mt-4 space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Nombre</span>
               <input
-                name={name ?? undefined}
-                type="url"
-                defaultValue={value ?? ''}
+                name="nombre"
+                defaultValue={editingExamen?.nombre ?? ''}
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
               />
             </label>
-          ))}
-          <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
-            <input
-              type="checkbox"
-              name="es_oficial"
-              defaultChecked={editingExamen?.es_oficial ?? true}
-            />
-            Examen oficial
-          </label>
-          {editingExamen ? (
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Fecha</span>
+              <input
+                name="fecha"
+                type="date"
+                defaultValue={editingExamen?.fecha ?? ''}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                Descripción
+              </span>
+              <textarea
+                name="descripcion"
+                defaultValue={editingExamen?.descripcion ?? ''}
+                className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+            {[
+              ['url_examen', 'URL del examen', editingExamen?.url_examen],
+              [
+                'url_plantilla_respuestas',
+                'URL de la plantilla de respuestas',
+                editingExamen?.url_plantilla_respuestas,
+              ],
+            ].map(([name, label, value]) => (
+              <label key={name} className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">{label}</span>
+                <input
+                  name={name ?? undefined}
+                  type="url"
+                  defaultValue={value ?? ''}
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                />
+              </label>
+            ))}
+            <label className="flex items-center gap-3 text-sm text-[var(--ink)]">
+              <input
+                type="checkbox"
+                name="es_oficial"
+                defaultChecked={editingExamen?.es_oficial ?? true}
+              />
+              Examen oficial
+            </label>
             <button
               type="button"
-              onClick={() => setEditingExamenId(null)}
+              onClick={closeCatalogForm}
               className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Cancelar edición
+              Cancelar
             </button>
-          ) : null}
-          <button
-            type="submit"
-            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-          >
-            {editingExamen ? 'Guardar cambios' : 'Guardar examen'}
-          </button>
-        </div>
-      </form>
+            <button
+              type="submit"
+              className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+            >
+              {editingExamen ? 'Guardar cambios' : 'Guardar examen'}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 
   const renderPreguntas = () => (
-    <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <QuestionImport exams={examenes} onSaved={() => void loadData()} />
-      {importExamFilter && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5e1d8] bg-white p-4 xl:col-span-2">
-          <p className="text-sm">
-            Examen:{' '}
-            {examenes.find((exam) => exam.id === importExamFilter)?.nombre ?? 'Examen seleccionado'}
-          </p>
-          <button
-            type="button"
-            className="rounded-lg border px-3 py-2 text-sm"
-            onClick={() => setImportExamFilter('')}
+    <div className="space-y-6">
+      {catalogView === 'list' ? (
+        <>
+          <QuestionImport exams={examenes} onSaved={() => void loadData()} />
+          {importExamFilter && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5e1d8] bg-white p-4 xl:col-span-2">
+              <p className="text-sm">
+                Examen:{' '}
+                {examenes.find((exam) => exam.id === importExamFilter)?.nombre ??
+                  'Examen seleccionado'}
+              </p>
+              <button
+                type="button"
+                className="rounded-lg border px-3 py-2 text-sm"
+                onClick={() => setImportExamFilter('')}
+              >
+                Ver todos los exámenes
+              </button>
+            </div>
+          )}
+          <CatalogTable
+            label="Banco de preguntas"
+            columns={['Enunciado', 'Examen', 'Estado', 'Origen', 'Situación', 'Acciones']}
+            empty={paginatedPreguntas.length === 0}
           >
-            Ver todos los exámenes
-          </button>
-        </div>
-      )}
-      <div className="space-y-4">
-        {paginatedPreguntas.map((item) => (
-          <article
-            key={item.id}
-            className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-          >
-            <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
-              {item.estado}
-            </p>
-            <h3 className="mt-2 text-xl font-semibold text-[var(--ink)]">{item.enunciado}</h3>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              Origen: {item.origen === 'oficial' ? 'Examen oficial' : 'Propia'} · Situación:{' '}
-              {item.situacion}
-            </p>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              {item.respuestas?.length ?? 0} respuestas
-              {item.referencia_fuente ? ` · Fuente: ${item.referencia_fuente}` : ''}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingPreguntaId(item.id);
-                setQuestionForm({
-                  enunciado: item.enunciado,
-                  numero: item.numero == null ? '' : String(item.numero),
-                  explicacion: item.explicacion ?? '',
-                  fuente_url: item.fuente_url ?? '',
-                  estado: (item.estado ?? 'revision') as QuestionForm['estado'],
-                  origen: (item.origen ?? 'propia') as QuestionForm['origen'],
-                  situacion: (item.situacion ?? 'ordinaria') as QuestionForm['situacion'],
-                  examen_id: item.examen_id ?? '',
-                  answers: emptyQuestionForm.answers.map((answer) => {
-                    const savedAnswer = item.respuestas?.find(
-                      (candidate) => candidate.orden === answer.orden,
-                    );
-                    return savedAnswer
-                      ? {
-                          orden: answer.orden,
-                          texto: savedAnswer.texto,
-                          es_correcta: savedAnswer.es_correcta,
-                        }
-                      : answer;
-                  }),
-                  topicIds: item.pregunta_tema?.map((relation) => relation.tema_id) ?? [],
-                });
-              }}
-              className="mt-3 rounded-full border border-[var(--line)] px-4 py-2 text-xs font-semibold"
-            >
-              Editar pregunta
-            </button>
-          </article>
-        ))}
-      </div>
-
-      <form
-        key={`pregunta-${editingPreguntaId ?? 'new'}`}
-        onSubmit={saveQuestion}
-        className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-      >
-        <p className="eyebrow">{editingPreguntaId ? 'Editar pregunta' : 'Nueva pregunta'}</p>
-        <div className="mt-4 space-y-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Enunciado</span>
-            <textarea
-              value={questionForm.enunciado}
-              onChange={(event) =>
-                setQuestionForm((current) => ({ ...current, enunciado: event.target.value }))
-              }
-              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-
-          <div className="grid gap-3 sm:grid-cols-2">
+            {paginatedPreguntas.map((item) => (
+              <tr key={item.id} className="align-top hover:bg-[#fdfcf9]">
+                <th scope="row" className="max-w-md px-5 py-4 font-medium">
+                  <p className="whitespace-pre-wrap break-words">{item.enunciado}</p>
+                  <p className="mt-2 text-xs font-normal text-[var(--muted)]">
+                    {item.respuestas?.length ?? 0} respuestas
+                    {item.referencia_fuente ? ` / Fuente: ${item.referencia_fuente}` : ''}
+                  </p>
+                </th>
+                <td className="max-w-xs px-5 py-4 text-[var(--muted)]">
+                  {examenes.find((exam) => exam.id === item.examen_id)?.nombre ?? 'Sin examen'}
+                  {item.numero != null ? ` / N.º ${item.numero}` : ''}
+                </td>
+                <td className="px-5 py-4">
+                  <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold">
+                    {item.estado === 'revision'
+                      ? 'En revisión'
+                      : item.estado === 'publicada'
+                        ? 'Publicada'
+                        : 'Desactivada'}
+                  </span>
+                </td>
+                <td className="px-5 py-4">
+                  {item.origen === 'oficial' ? 'Examen oficial' : 'Propia'}
+                </td>
+                <td className="px-5 py-4">
+                  {item.situacion === 'anulada'
+                    ? 'Anulada'
+                    : item.situacion === 'reserva'
+                      ? 'Reserva'
+                      : 'Ordinaria'}
+                </td>
+                <td className="px-5 py-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openCatalogForm('preguntas', item.id);
+                      setQuestionForm({
+                        enunciado: item.enunciado,
+                        numero: item.numero == null ? '' : String(item.numero),
+                        explicacion: item.explicacion ?? '',
+                        fuente_url: item.fuente_url ?? '',
+                        estado: (item.estado ?? 'revision') as QuestionForm['estado'],
+                        origen: (item.origen ?? 'propia') as QuestionForm['origen'],
+                        situacion: (item.situacion ?? 'ordinaria') as QuestionForm['situacion'],
+                        examen_id: item.examen_id ?? '',
+                        answers: emptyQuestionForm.answers.map((answer) => {
+                          const savedAnswer = item.respuestas?.find(
+                            (candidate) => candidate.orden === answer.orden,
+                          );
+                          return savedAnswer
+                            ? {
+                                orden: answer.orden,
+                                texto: savedAnswer.texto,
+                                es_correcta: savedAnswer.es_correcta,
+                              }
+                            : answer;
+                        }),
+                        topicIds: item.pregunta_tema?.map((relation) => relation.tema_id) ?? [],
+                      });
+                    }}
+                    className="min-h-10 whitespace-nowrap rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
+                  >
+                    Editar pregunta
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </CatalogTable>
+        </>
+      ) : (
+        <form
+          key={`pregunta-${editingPreguntaId ?? 'new'}`}
+          onSubmit={saveQuestion}
+          aria-label={editingPreguntaId ? 'Editar pregunta' : 'Crear pregunta'}
+          className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--line)] bg-white p-5 sm:p-8"
+        >
+          <p className="eyebrow">{editingPreguntaId ? 'Editar pregunta' : 'Nueva pregunta'}</p>
+          <div className="mt-4 space-y-4">
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Número</span>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={questionForm.numero}
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Enunciado</span>
+              <textarea
+                value={questionForm.enunciado}
                 onChange={(event) =>
-                  setQuestionForm((current) => ({ ...current, numero: event.target.value }))
+                  setQuestionForm((current) => ({ ...current, enunciado: event.target.value }))
+                }
+                className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Número</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={questionForm.numero}
+                  onChange={(event) =>
+                    setQuestionForm((current) => ({ ...current, numero: event.target.value }))
+                  }
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Estado</span>
+                <select
+                  value={questionForm.estado}
+                  onChange={(event) =>
+                    setQuestionForm((current) => ({
+                      ...current,
+                      estado: event.target.value as QuestionForm['estado'],
+                    }))
+                  }
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                >
+                  <option value="revision">Revisión</option>
+                  <option value="publicada">Publicada</option>
+                  <option value="desactivada">Desactivada</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Origen</span>
+                <select
+                  value={questionForm.origen}
+                  onChange={(event) =>
+                    setQuestionForm((current) => ({
+                      ...current,
+                      origen: event.target.value as QuestionForm['origen'],
+                    }))
+                  }
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                >
+                  <option value="propia">Propia</option>
+                  <option value="oficial">Oficial</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                  Situación
+                </span>
+                <select
+                  value={questionForm.situacion}
+                  onChange={(event) =>
+                    setQuestionForm((current) => ({
+                      ...current,
+                      situacion: event.target.value as QuestionForm['situacion'],
+                    }))
+                  }
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                >
+                  <option value="ordinaria">Ordinaria</option>
+                  <option value="reserva">Reserva</option>
+                  <option value="anulada">Anulada</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                Explicación
+              </span>
+              <textarea
+                value={questionForm.explicacion}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({ ...current, explicacion: event.target.value }))
+                }
+                className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
+                URL de la fuente
+              </span>
+              <input
+                type="url"
+                value={questionForm.fuente_url}
+                onChange={(event) =>
+                  setQuestionForm((current) => ({ ...current, fuente_url: event.target.value }))
                 }
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
               />
             </label>
+
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Estado</span>
+              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Examen</span>
               <select
-                value={questionForm.estado}
+                value={questionForm.examen_id}
                 onChange={(event) =>
-                  setQuestionForm((current) => ({
-                    ...current,
-                    estado: event.target.value as QuestionForm['estado'],
-                  }))
+                  setQuestionForm((current) => ({ ...current, examen_id: event.target.value }))
                 }
                 className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
               >
-                <option value="revision">Revisión</option>
-                <option value="publicada">Publicada</option>
-                <option value="desactivada">Desactivada</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Origen</span>
-              <select
-                value={questionForm.origen}
-                onChange={(event) =>
-                  setQuestionForm((current) => ({
-                    ...current,
-                    origen: event.target.value as QuestionForm['origen'],
-                  }))
-                }
-                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-              >
-                <option value="propia">Propia</option>
-                <option value="oficial">Oficial</option>
+                <option value="">Sin examen asociado</option>
+                {examenes.map((examen) => (
+                  <option key={examen.id} value={examen.id}>
+                    {examen.nombre}
+                  </option>
+                ))}
               </select>
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Situación</span>
-              <select
-                value={questionForm.situacion}
-                onChange={(event) =>
-                  setQuestionForm((current) => ({
-                    ...current,
-                    situacion: event.target.value as QuestionForm['situacion'],
-                  }))
-                }
-                className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-              >
-                <option value="ordinaria">Ordinaria</option>
-                <option value="reserva">Reserva</option>
-                <option value="anulada">Anulada</option>
-              </select>
-            </label>
-          </div>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Explicación</span>
-            <textarea
-              value={questionForm.explicacion}
-              onChange={(event) =>
-                setQuestionForm((current) => ({ ...current, explicacion: event.target.value }))
-              }
-              className="min-h-24 w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">
-              URL de la fuente
-            </span>
-            <input
-              type="url"
-              value={questionForm.fuente_url}
-              onChange={(event) =>
-                setQuestionForm((current) => ({ ...current, fuente_url: event.target.value }))
-              }
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--ink)]">Examen</span>
-            <select
-              value={questionForm.examen_id}
-              onChange={(event) =>
-                setQuestionForm((current) => ({ ...current, examen_id: event.target.value }))
-              }
-              className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-            >
-              <option value="">Sin examen asociado</option>
-              {examenes.map((examen) => (
-                <option key={examen.id} value={examen.id}>
-                  {examen.nombre}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div>
-            <p className="mb-2 text-sm font-semibold text-[var(--ink)]">Temas</p>
-            <div className="flex flex-wrap gap-2">
-              {temas.map((tema) => {
-                const selected = questionForm.topicIds.includes(tema.id);
-                return (
-                  <button
-                    key={tema.id}
-                    type="button"
-                    onClick={() =>
-                      setQuestionForm((current) => ({
-                        ...current,
-                        topicIds: selected
-                          ? current.topicIds.filter((id) => id !== tema.id)
-                          : [...current.topicIds, tema.id],
-                      }))
-                    }
-                    className={[
-                      'rounded-full border px-3 py-2 text-xs font-semibold',
-                      selected
-                        ? 'border-[var(--coral)] bg-[rgba(243,111,94,0.08)] text-[var(--coral)]'
-                        : 'border-[var(--line)] bg-white text-[var(--ink)]',
-                    ].join(' ')}
-                  >
-                    {tema.nombre}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {questionForm.answers.map((answer, index) => (
-              <div
-                key={index}
-                className="rounded-xl border border-[var(--line)] bg-[rgba(22,31,29,0.02)] p-3"
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-[var(--ink)]">
-                    Opción {index + 1}
-                  </span>
-                  <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
-                    <input
-                      type="checkbox"
-                      checked={answer.es_correcta}
-                      onChange={(event) =>
+            <div>
+              <p className="mb-2 text-sm font-semibold text-[var(--ink)]">Temas</p>
+              <div className="flex flex-wrap gap-2">
+                {temas.map((tema) => {
+                  const selected = questionForm.topicIds.includes(tema.id);
+                  return (
+                    <button
+                      key={tema.id}
+                      type="button"
+                      onClick={() =>
                         setQuestionForm((current) => ({
                           ...current,
-                          answers: current.answers.map((item, currentIndex) =>
-                            currentIndex === index
-                              ? { ...item, es_correcta: event.target.checked }
-                              : item,
-                          ),
+                          topicIds: selected
+                            ? current.topicIds.filter((id) => id !== tema.id)
+                            : [...current.topicIds, tema.id],
                         }))
                       }
-                    />
-                    Correcta
-                  </label>
-                </div>
-                <input
-                  value={answer.texto}
-                  onChange={(event) =>
-                    setQuestionForm((current) => ({
-                      ...current,
-                      answers: current.answers.map((item, currentIndex) =>
-                        currentIndex === index ? { ...item, texto: event.target.value } : item,
-                      ),
-                    }))
-                  }
-                  className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
-                  placeholder={`Texto de la opción ${index + 1}`}
-                />
+                      className={[
+                        'rounded-full border px-3 py-2 text-xs font-semibold',
+                        selected
+                          ? 'border-[var(--coral)] bg-[rgba(243,111,94,0.08)] text-[var(--coral)]'
+                          : 'border-[var(--line)] bg-white text-[var(--ink)]',
+                      ].join(' ')}
+                    >
+                      {tema.nombre}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            </div>
 
-          <button
-            type="submit"
-            className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
-          >
-            {editingPreguntaId ? 'Guardar cambios' : 'Guardar pregunta'}
-          </button>
-          {editingPreguntaId ? (
+            <div className="space-y-3">
+              {questionForm.answers.map((answer, index) => (
+                <div
+                  key={index}
+                  className="rounded-xl border border-[var(--line)] bg-[rgba(22,31,29,0.02)] p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-[var(--ink)]">
+                      Opción {index + 1}
+                    </span>
+                    <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
+                      <input
+                        type="checkbox"
+                        checked={answer.es_correcta}
+                        onChange={(event) =>
+                          setQuestionForm((current) => ({
+                            ...current,
+                            answers: current.answers.map((item, currentIndex) =>
+                              currentIndex === index
+                                ? { ...item, es_correcta: event.target.checked }
+                                : item,
+                            ),
+                          }))
+                        }
+                      />
+                      Correcta
+                    </label>
+                  </div>
+                  <input
+                    value={answer.texto}
+                    onChange={(event) =>
+                      setQuestionForm((current) => ({
+                        ...current,
+                        answers: current.answers.map((item, currentIndex) =>
+                          currentIndex === index ? { ...item, texto: event.target.value } : item,
+                        ),
+                      }))
+                    }
+                    className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5"
+                    placeholder={`Texto de la opción ${index + 1}`}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              className="w-full rounded-full bg-[var(--coral)] px-5 py-3 font-sans text-sm font-semibold text-white"
+            >
+              {editingPreguntaId ? 'Guardar cambios' : 'Guardar pregunta'}
+            </button>
             <button
               type="button"
-              onClick={() => {
-                setEditingPreguntaId(null);
-                setQuestionForm(emptyQuestionForm);
-              }}
+              onClick={closeCatalogForm}
               className="w-full rounded-full border border-[var(--line)] px-5 py-3 text-sm font-semibold"
             >
-              Cancelar edición
+              Cancelar
             </button>
-          ) : null}
-        </div>
-      </form>
+          </div>
+        </form>
+      )}
     </div>
   );
 
   const renderUsuarios = () => (
-    <div className="space-y-4">
+    <CatalogTable
+      label="Usuarios"
+      columns={['Correo', 'Rol', 'Fecha de creación', 'Último acceso', 'Acciones']}
+      empty={paginatedProfiles.length === 0}
+    >
       {paginatedProfiles.map((item) => (
-        <article
-          key={item.id}
-          className="rounded-[2rem] border border-[var(--line)] bg-white/80 p-5"
-        >
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="font-sans text-xs font-bold uppercase tracking-[0.18em] text-[var(--coral)]">
-                {item.rol ?? 'usuario'}
-              </p>
-              <h3 className="mt-2 break-all text-xl font-semibold text-[var(--ink)]">
-                {item.email || 'Correo no disponible'}
-              </h3>
-              <dl className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-                <div>
-                  <dt className="font-semibold">Fecha de creación</dt>
-                  <dd>{formatUserDate(item.created_at, 'Fecha no disponible')}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold">Último acceso</dt>
-                  <dd>{formatUserDate(item.last_sign_in_at, 'Sin accesos registrados')}</dd>
-                </div>
-              </dl>
-            </div>
+        <tr key={item.id} className="align-top hover:bg-[#fdfcf9]">
+          <th scope="row" className="max-w-xs break-all px-5 py-4 font-medium">
+            {item.email || 'Correo no disponible'}
+          </th>
+          <td className="px-5 py-4">
+            <span
+              className={
+                item.rol === 'admin'
+                  ? 'rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700'
+                  : 'rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700'
+              }
+            >
+              {item.rol === 'admin' ? 'Administrador' : 'Usuario'}
+            </span>
+          </td>
+          <td className="whitespace-nowrap px-5 py-4 text-[var(--muted)]">
+            {formatUserDate(item.created_at, 'Fecha no disponible')}
+          </td>
+          <td className="whitespace-nowrap px-5 py-4 text-[var(--muted)]">
+            {formatUserDate(item.last_sign_in_at, 'Sin accesos registrados')}
+          </td>
+          <td className="px-5 py-4">
             <button
               type="button"
               onClick={() => toggleProfileRole(item.id, item.rol ?? 'usuario')}
-              className={[
-                'rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.12em]',
-                item.rol === 'admin'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-slate-200 text-slate-700',
-              ].join(' ')}
+              className="min-h-10 whitespace-nowrap rounded-lg border border-[var(--line)] px-3 text-xs font-semibold"
             >
               {item.rol === 'admin' ? 'Quitar admin' : 'Dar admin'}
             </button>
-          </div>
-        </article>
+          </td>
+        </tr>
       ))}
-    </div>
+    </CatalogTable>
   );
 
   const renderPlanes = () => (
@@ -2477,25 +2690,42 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
               <p className="mb-2 text-xs text-[#8b887f]">
                 Administración <span className="mx-2">/</span> {sectionLabels[activeSection]}
               </p>
-              <h1 className="font-serif text-3xl font-normal tracking-[-0.04em] text-[#302f2b] sm:text-4xl">
-                {pageTitles[activeSection]}
+              <h1
+                ref={catalogHeadingRef}
+                tabIndex={-1}
+                className="outline-none font-serif text-3xl font-normal tracking-[-0.04em] text-[#302f2b] sm:text-4xl"
+              >
+                {isCatalogForm
+                  ? `${isEditingCatalog ? 'Editar' : 'Crear'} ${catalogEntityLabel}`
+                  : pageTitles[activeSection]}
               </h1>
               <p className="mt-2 max-w-2xl text-sm text-[#77756e]">
                 {pageDescriptions[activeSection]}
               </p>
             </div>
+            {isCatalogSection ? (
+              <button
+                type="button"
+                onClick={() =>
+                  isCatalogForm ? closeCatalogForm() : openCatalogForm(activeSection)
+                }
+                className="min-h-11 rounded-lg bg-[#bd3734] px-4 text-sm font-semibold text-white hover:bg-[#a82f2c]"
+              >
+                {isCatalogForm ? 'Volver al listado' : `+ Crear ${catalogEntityLabel}`}
+              </button>
+            ) : null}
             {activeSection === 'resumen' ? (
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => changeSection('convocatorias')}
+                  onClick={() => openCatalogForm('convocatorias')}
                   className="min-h-11 rounded-lg bg-[#bd3734] px-4 font-sans text-sm font-semibold text-white hover:bg-[#a82f2c]"
                 >
                   + Nueva convocatoria
                 </button>
                 <button
                   type="button"
-                  onClick={() => changeSection('examenes')}
+                  onClick={() => openCatalogForm('examenes')}
                   className="min-h-11 rounded-lg border border-[#d8d2c8] bg-white px-4 font-sans text-sm font-semibold text-[#393833] hover:bg-[#f8f7f3]"
                 >
                   Crear examen
@@ -2504,7 +2734,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             ) : null}
           </div>
 
-          {activeSection !== 'resumen' ? (
+          {activeSection !== 'resumen' && !isCatalogForm ? (
             <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#e5e1d8] bg-white p-4 md:flex-row md:items-center">
               <label className="relative min-w-0 flex-1">
                 <span className="sr-only">
@@ -2602,7 +2832,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           ) : (
             <>
               {renderCurrentSection()}
-              {activeSection !== 'resumen' ? (
+              {activeSection !== 'resumen' && !isCatalogForm ? (
                 <div className="mt-5 flex flex-col gap-3 text-sm text-[#77756e] sm:flex-row sm:items-center sm:justify-between">
                   <span>
                     {activeRowCount > 0
