@@ -6,6 +6,8 @@ La revisión conserva las filas originales, permite filtrar incidencias, excluir
 
 ## Instalación y modelo
 
+Para cargar todo el Excel en un mismo tema, selecciona **Tema para todas las preguntas** durante la revisión y pulsa **Aplicar tema a todas las preguntas**. Sustituye las asignaciones de todas las filas, incluso las excluidas o con tema vacío, sin cambiar sus exclusiones. Puedes ajustar después cada fila; la acción exige confirmar de nuevo el lote.
+
 Aplicar `supabase/migrations/20261021000000_bulk_question_import.sql` después de las migraciones existentes. No necesita claves privilegiadas ni nuevas variables de entorno. Se utiliza la sesión administrativa y las políticas existentes.
 
 - `preguntas.examen_id` y `numero` representan la numeración de esa pregunta dentro del examen existente. No se crean copias por convocatoria.

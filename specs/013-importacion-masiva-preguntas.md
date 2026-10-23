@@ -103,9 +103,13 @@ Las preguntas anuladas o incompatibles con el modelo deben retirarse del archivo
 
 Buscar coincidencias entre los temas existentes normalizando espacios y mayúsculas. Una coincidencia única permite proponer el tema; varias coincidencias requieren selección explícita. Mostrar información suficiente para distinguir temas con nombres iguales.
 
+Los selectores de temas de la revisión muestran nombres y descripciones completos en varias líneas, permiten buscar por ambos campos y mantienen visible la descripción del tema seleccionado. Deben adaptarse al ancho disponible y poder usarse con teclado.
+
 Si no hay coincidencia, permitir elegir otro tema o dejar la pregunta sin tema de forma explícita. No crear temas automáticamente. Un valor vacío se importa sin tema y se indica en el resumen.
 
 Permitir aplicar una resolución a todas las filas con el mismo valor de `tema`. La relación se guarda mediante el mecanismo del banco existente, respetando su cardinalidad.
+
+En la revisión, permitir seleccionar un tema existente y aplicarlo explícitamente a todas las filas del archivo, incluidas las excluidas y las de tema vacío, independientemente de filtros y paginación. Esta acción sustituye las resoluciones anteriores, conserva las exclusiones y exige renovar la confirmación del lote. Después se permite ajustar el tema de cada fila.
 
 ## Posibles duplicados
 
