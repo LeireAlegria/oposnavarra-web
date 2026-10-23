@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ImportTopicPicker } from './import-topic-picker';
 import {
   defaultDecisions,
   MAX_IMPORT_BYTES,
@@ -43,6 +44,7 @@ export function QuestionImport({
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [batchTopicId, setBatchTopicId] = useState('');
   const rows = preview ? reviewRows(preview, decisions, !!examId) : [];
   const included = rows.filter((item) => item.decision?.included);
   const errors = included.filter((item) => item.issues.length);
@@ -79,6 +81,7 @@ export function QuestionImport({
     setPage(1);
     setFilter('all');
     setSearch('');
+    setBatchTopicId('');
   }
   function resolve(rowNumber: number, patch: Partial<ImportDecision>, sameTopic = false) {
     const source = preview?.rows.find((row) => row.rowNumber === rowNumber)?.topic;
@@ -438,6 +441,43 @@ export function QuestionImport({
                     preguntas.
                   </p>
                   <fieldset disabled={!!busy || uncertain} className="min-w-0 space-y-4">
+                    <div className="rounded-xl border border-[#e5e1d8] p-4">
+                      <ImportTopicPicker
+                        label="Tema para todas las preguntas"
+                        topics={preview.catalog.topics}
+                        value={batchTopicId}
+                        onChange={setBatchTopicId}
+                      />
+                      <p className="mt-2 text-xs text-[#777468]">
+                        Sustituye el tema de todas las filas del archivo, incluidas las excluidas y
+                        las que no tienen tema en Excel, aunque uses filtros o cambies de página.
+                        Después puedes ajustar cada fila.
+                      </p>
+                      {!preview.catalog.topics.length && (
+                        <p className="mt-2 text-sm text-[#777468]">
+                          No hay temas disponibles. Crea un tema antes de preparar la importación.
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        className={`${buttonClass} mt-3`}
+                        disabled={!batchTopicId}
+                        onClick={() => {
+                          setDecisions((current) =>
+                            current.map((decision) => ({
+                              ...decision,
+                              topicId: batchTopicId,
+                              topicResolved: true,
+                            })),
+                          );
+                          setConfirming(false);
+                          setReviewed(false);
+                          setMessage('');
+                        }}
+                      >
+                        Aplicar tema a todas las preguntas
+                      </button>
+                    </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="text-xs font-medium">
                         Buscar fila, contenido o tema
@@ -548,69 +588,34 @@ export function QuestionImport({
                                   )}
                                   <div className="rounded-lg border border-[#e5e1d8] p-3">
                                     <p className="text-xs text-[#777468]">
-                                      Tema en Excel: {row.topic || 'Vacío: se importará sin tema'}
+                                      Tema en Excel: {row.topic || 'Vacío'}
                                     </p>
-                                    {row.topic && (
+                                    <p className="mt-1 text-xs text-[#777468]">
+                                      Tema asignado:{' '}
+                                      {selected?.nombre ||
+                                        (decision?.topicResolved
+                                          ? 'Sin tema'
+                                          : 'Pendiente de resolver')}
+                                    </p>
+                                    {
                                       <>
-                                        <label className="mt-2 block text-xs font-medium">
-                                          Resolver tema de fila {row.rowNumber}
-                                          <select
-                                            className={inputClass}
-                                            value={
-                                              decision?.topicResolved
-                                                ? decision.topicId || 'none'
-                                                : 'pending'
-                                            }
-                                            onChange={(event) =>
-                                              resolve(row.rowNumber, {
-                                                topicResolved: event.target.value !== 'pending',
-                                                topicId: ['pending', 'none'].includes(
-                                                  event.target.value,
-                                                )
-                                                  ? null
-                                                  : event.target.value,
-                                              })
-                                            }
-                                          >
-                                            <option value="pending">
-                                              Selecciona un tema o decide dejarla sin tema…
-                                            </option>
-                                            <option value="none">
-                                              Dejar explícitamente sin tema
-                                            </option>
-                                            {candidates.length > 0 && (
-                                              <optgroup
-                                                label={
-                                                  candidates.length === 1
-                                                    ? 'Coincidencia propuesta (requiere aceptar)'
-                                                    : 'Coincidencias: elige el contenido adecuado'
-                                                }
-                                              >
-                                                {candidates.map((topic) => (
-                                                  <option key={topic.id} value={topic.id}>
-                                                    {topic.nombre}
-                                                    {topic.descripcion
-                                                      ? ` — ${topic.descripcion.slice(0, 120)}`
-                                                      : ' — Sin descripción'}
-                                                  </option>
-                                                ))}
-                                              </optgroup>
-                                            )}
-                                            <optgroup label="Otros temas del catálogo">
-                                              {preview.catalog.topics
-                                                .filter((topic) => !candidates.includes(topic))
-                                                .map((topic) => (
-                                                  <option key={topic.id} value={topic.id}>
-                                                    {topic.nombre}
-                                                    {topic.descripcion
-                                                      ? ` — ${topic.descripcion.slice(0, 120)}`
-                                                      : ' — Sin descripción'}
-                                                  </option>
-                                                ))}
-                                            </optgroup>
-                                          </select>
-                                        </label>
-                                        {!candidates.length && (
+                                        <ImportTopicPicker
+                                          label={'Resolver tema de fila ' + row.rowNumber}
+                                          topics={preview.catalog.topics}
+                                          value={
+                                            decision?.topicResolved
+                                              ? decision.topicId || 'none'
+                                              : 'pending'
+                                          }
+                                          allowNone
+                                          onChange={(value) =>
+                                            resolve(row.rowNumber, {
+                                              topicResolved: true,
+                                              topicId: value === 'none' ? null : value,
+                                            })
+                                          }
+                                        />
+                                        {row.topic && !candidates.length && (
                                           <p className="mt-2 text-xs text-[#a82f2c]">
                                             No se encontró una coincidencia. Elige un tema existente
                                             o deja la pregunta sin tema.
@@ -640,7 +645,7 @@ export function QuestionImport({
                                           Aplicar a todas las filas con «{row.topic}»
                                         </button>
                                       </>
-                                    )}
+                                    }
                                   </div>
                                   {item.duplicate && (
                                     <div className="space-y-3 rounded-lg border border-[#e4c998] bg-[#fffbf2] p-3">

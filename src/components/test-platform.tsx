@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { TestTopicSelection } from './test-topic-selection';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -319,16 +320,6 @@ export function TestPlatform({
       setIsLoadingHistory(false);
     }
   }
-
-  const toggleTopic = (topicId: string) => {
-    setTopicIds((current) => {
-      if (current.includes(topicId)) {
-        return current.filter((value) => value !== topicId);
-      }
-      return [...current, topicId];
-    });
-    setErrorMessage('');
-  };
 
   const handleStartAttempt = async () => {
     if (!canPractice || !convocationId || availableQuestions === null) {
@@ -759,33 +750,14 @@ export function TestPlatform({
                         {allTopicsSelected ? 'Deseleccionar todos' : 'Seleccionar todos'}
                       </button>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {availableTopics.map((topic, index) => (
-                        <label
-                          key={topic.id}
-                          className={[
-                            'inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
-                            topicIds.includes(topic.id)
-                              ? 'border-[#bd3734] bg-[#fbefec] text-[#302f2b]'
-                              : 'border-[var(--line)] bg-white text-[var(--muted)] hover:border-[#bd3734]',
-                          ].join(' ')}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={topicIds.includes(topic.id)}
-                            onChange={() => toggleTopic(topic.id)}
-                            className="h-4 w-4 accent-[#bd3734] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]"
-                          />
-                          <span>
-                            {(index === 0 ||
-                              availableTopics[index - 1].blockId !== topic.blockId) && (
-                              <strong className="mb-2 block">{topic.blockName}</strong>
-                            )}
-                            {topic.number}. {topic.name}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                    <TestTopicSelection
+                      topics={availableTopics}
+                      selectedIds={topicIds}
+                      onChange={(ids) => {
+                        setTopicIds(ids);
+                        setErrorMessage('');
+                      }}
+                    />
                     <p className="mt-3 text-xs text-[var(--muted)]" aria-live="polite">
                       {availableQuestions === null
                         ? 'Calculando disponibilidad…'
@@ -886,12 +858,27 @@ export function TestPlatform({
                   <div className="py-3">
                     <dt className="text-xs text-[var(--muted)]">Temas seleccionados</dt>
                     <dd className="mt-1 font-medium">
-                      {topicIds.length} {topicIds.length === 1 ? 'tema' : 'temas'}
-                      {topicIds.length ? ': ' : ''}
-                      {availableTopics
-                        .filter((topic) => topicIds.includes(topic.id))
-                        .map((topic) => topic.name)
-                        .join(', ') || 'Ninguno'}
+                      {topicIds.length === 0
+                        ? 'Ninguno'
+                        : allTopicsSelected
+                          ? `Todos los temas (${topicIds.length})`
+                          : `${topicIds.length} ${topicIds.length === 1 ? 'tema' : 'temas'}`}
+                      {topicIds.length > 0 && (
+                        <details className="mt-2 text-sm font-normal">
+                          <summary className="min-h-11 cursor-pointer rounded-md py-3 font-semibold text-[#a82f2c] focus-visible:outline-2 focus-visible:outline-[#bd3734]">
+                            Ver temas seleccionados
+                          </summary>
+                          <ul className="mt-2 max-h-60 space-y-2 overflow-y-auto rounded-lg bg-white p-3">
+                            {availableTopics
+                              .filter((topic) => topicIds.includes(topic.id))
+                              .map((topic) => (
+                                <li key={topic.id} className="break-words leading-6">
+                                  {topic.number}. {topic.name}
+                                </li>
+                              ))}
+                          </ul>
+                        </details>
+                      )}
                     </dd>
                   </div>
                   <div className="grid grid-cols-2 gap-3 py-3">
@@ -905,12 +892,6 @@ export function TestPlatform({
                         {timeLimitSeconds === 0 ? 'Sin límite' : formatSeconds(timeLimitSeconds)}
                       </dd>
                     </div>
-                  </div>
-                  <div className="py-3">
-                    <dt className="text-xs text-[var(--muted)]">Preguntas disponibles</dt>
-                    <dd className="mt-1 font-semibold">
-                      {availableQuestions === null ? 'Calculando…' : availableQuestions}
-                    </dd>
                   </div>
                 </dl>
                 {!canPractice ? (
@@ -1604,7 +1585,9 @@ export function TestPlatform({
                       <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[var(--muted)]">
                         <p>
                           <span className="font-medium text-[#302f2b]">Temas: </span>
-                          {attempt.selectedTopics.map((topic) => topic.name).join(', ')}
+                          {attempt.selectedTopics.length === 0
+                            ? 'Ninguno'
+                            : `${attempt.selectedTopics.length} ${attempt.selectedTopics.length === 1 ? 'tema' : 'temas'}`}
                         </p>
                         <p>
                           <span className="font-medium text-[#302f2b]">Convocatoria: </span>
@@ -1616,22 +1599,24 @@ export function TestPlatform({
                         </p>
                       </div>
                       {attempt.result?.byTopic.length ? (
-                        <div className="mt-5 border-t border-[var(--line)] pt-4">
-                          <h3 className="text-sm font-semibold">Resultados por tema</h3>
-                          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <details className="mt-5 border-t border-[var(--line)] pt-4">
+                          <summary className="min-h-11 cursor-pointer rounded-md py-3 text-sm font-semibold text-[#a82f2c] focus-visible:outline-2 focus-visible:outline-[#bd3734]">
+                            Ver resultados por tema
+                          </summary>
+                          <ul className="mt-3 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">
                             {attempt.result.byTopic.map((topic) => (
                               <li
                                 key={topic.topicId}
-                                className="flex items-center justify-between gap-3 rounded-lg bg-[#f8f7f3] px-3 py-2 text-sm"
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[#f8f7f3] px-3 py-2 text-sm"
                               >
-                                <span>{topic.topicName}</span>
+                                <span className="min-w-0 break-words">{topic.topicName}</span>
                                 <span className="shrink-0 font-medium">
                                   {topic.porcentajeAciertos} % · {topic.questionCount} preguntas
                                 </span>
                               </li>
                             ))}
                           </ul>
-                        </div>
+                        </details>
                       ) : null}
                     </article>
                   ),

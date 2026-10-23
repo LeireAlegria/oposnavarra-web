@@ -66,6 +66,12 @@ Rediseñar la pantalla previa a la realización conservando el comportamiento de
 
 No modificar el algoritmo de selección de preguntas ni las reglas de creación de intentos.
 
+El resumen muestra únicamente la cantidad de temas seleccionados (o «Todos los temas (N)» / «Ninguno»). Los nombres se consultan mediante «Ver temas seleccionados», cerrado inicialmente, con una lista de altura limitada y desplazamiento vertical para mantener compacto el resumen.
+
+El resumen no muestra la cantidad de preguntas disponibles; se mantienen las validaciones de disponibilidad al configurar e iniciar el test.
+
+La selección de temas se presenta en tarjetas separadas por los bloques existentes del catálogo, respetando su orden y numeración. Cada bloque muestra su nombre, el número de temas seleccionados y una acción para seleccionarlo o desmarcarlo completo sin alterar otros bloques. Los temas se muestran en filas con casillas y texto completo adaptable al ancho disponible. Se conserva la selección individual, la acción global y la selección inicial de todos los temas; los catálogos sin bloque se presentan como «General».
+
 ## 5. Pantalla de realización de test
 
 ### 5.1. Encabezado
@@ -133,6 +139,8 @@ No modificar el sistema de corrección ni almacenar copias de los enunciados.
 ## 7. Historial
 
 Rediseñar el historial sencillo definido en la spec 007. Mostrar fecha, configuración, número de preguntas, resultado y enlace al detalle cuando esos datos estén disponibles.
+
+Cada test muestra la cantidad de temas seleccionados, sin enumerar sus nombres. El desglose de resultados por tema se consulta en un desplegable cerrado inicialmente, con altura limitada y desplazamiento vertical, para mantener compacta la lista del historial.
 
 Las consultas deben recuperar únicamente los intentos del usuario autorizado y respetar las políticas RLS existentes. No crear nuevos registros históricos ni nuevas métricas para justificar el diseño.
 

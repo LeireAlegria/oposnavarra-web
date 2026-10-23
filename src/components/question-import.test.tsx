@@ -42,6 +42,43 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('question import review flow', () => {
+  it('applies one topic across pages and filters, including empty and excluded rows, and renews confirmation', async () => {
+    const data = structuredClone(preview);
+    data.rows = Array.from({ length: 21 }, (_, index) => ({
+      ...preview.rows[0],
+      rowNumber: index + 2,
+      text: index === 0 ? preview.rows[0].text : `Pregunta ${index + 1}`,
+      topic: index % 2 ? 'Otro tema' : '',
+    }));
+    data.catalog.topics = [{ id: 't1', nombre: 'Constitución', descripcion: 'Contenido oficial' }];
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => data })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ created: 20, excluded: 1 }) });
+    await prepare(fetcher);
+    fireEvent.click(screen.getByLabelText('Fila 2'));
+    fireEvent.change(screen.getByLabelText('Mostrar'), { target: { value: 'topics' } });
+    fireEvent.click(screen.getByRole('button', { name: /Tema para todas las preguntas/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Contenido oficial/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar tema a todas las preguntas' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Importar 20 preguntas' }));
+    fireEvent.click(screen.getByLabelText(/He revisado el contenido/));
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar tema a todas las preguntas' }));
+    expect(screen.queryByLabelText(/He revisado el contenido/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Importar 20 preguntas' }));
+    fireEvent.click(screen.getByLabelText(/He revisado el contenido/));
+    fireEvent.click(screen.getByRole('button', { name: 'Importar 20 preguntas' }));
+    await screen.findByText('Importación completada');
+    const decisions = JSON.parse(fetcher.mock.calls[1][1].body.get('decisions'));
+    expect(decisions).toHaveLength(21);
+    expect(
+      decisions.every(
+        (item: { topicId: string; topicResolved: boolean }) =>
+          item.topicId === 't1' && item.topicResolved,
+      ),
+    ).toBe(true);
+    expect(decisions[0].included).toBe(false);
+  });
   it('requires an in-flow confirmation and academic review before sending the batch', async () => {
     const fetcher = vi
       .fn()
@@ -66,7 +103,8 @@ describe('question import review flow', () => {
     await prepare(vi.fn().mockResolvedValue({ ok: true, json: async () => data }));
     expect(screen.getByRole('button', { name: 'Importar 1 preguntas' })).toBeDisabled();
     fireEvent.click(screen.getByText('¿Cuál es la respuesta?', { selector: 'summary' }));
-    fireEvent.change(screen.getByLabelText('Resolver tema de fila 2'), { target: { value: 't1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Resolver tema de fila 2/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Contenido oficial/ }));
     expect(screen.getByRole('button', { name: 'Importar 1 preguntas' })).toBeEnabled();
     fireEvent.click(screen.getByLabelText('Fila 2'));
     expect(screen.getByRole('button', { name: 'Importar 0 preguntas' })).toBeDisabled();
