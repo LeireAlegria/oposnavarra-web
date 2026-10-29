@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { ChallengePlatformShell } from './challenge-platform-shell';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -113,8 +114,8 @@ export function Challenges({
     }
   }
   return (
-    <main className="min-h-screen bg-[#f8f7f3] px-4 py-6 text-[#302f2b] sm:px-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <ChallengePlatformShell>
+      <div className="space-y-6">
         <nav className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/plataforma" className="text-sm font-semibold text-[#a82f2c]">
             ← Plataforma
@@ -443,7 +444,7 @@ export function Challenges({
           </article>
         )}
       </div>
-    </main>
+    </ChallengePlatformShell>
   );
 }
 

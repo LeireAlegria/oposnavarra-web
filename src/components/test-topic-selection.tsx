@@ -1,5 +1,6 @@
 'use client';
 
+import { useId, useState } from 'react';
 import type { TestCatalogTopic } from '@/lib/test-platform-api';
 
 export function TestTopicSelection({
@@ -11,6 +12,8 @@ export function TestTopicSelection({
   selectedIds: string[];
   onChange: (ids: string[]) => void;
 }) {
+  const sectionId = useId();
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
   const blocks = new Map<string, { name: string; topics: TestCatalogTopic[] }>();
   for (const topic of topics) {
     const key = topic.blockId ?? topic.blockName ?? 'General';
@@ -23,6 +26,8 @@ export function TestTopicSelection({
       {Array.from(blocks, ([key, block]) => {
         const selectedCount = block.topics.filter((topic) => selectedIds.includes(topic.id)).length;
         const allSelected = selectedCount === block.topics.length;
+        const isExpanded = !collapsedBlocks.has(key);
+        const contentId = `${sectionId}-${encodeURIComponent(key)}`;
         return (
           <fieldset
             key={key}
@@ -32,9 +37,26 @@ export function TestTopicSelection({
               {block.name}
             </legend>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-[var(--muted)]" aria-live="polite">
-                {selectedCount} de {block.topics.length} temas seleccionados
-              </p>
+              <button
+                type="button"
+                aria-expanded={isExpanded}
+                aria-controls={contentId}
+                onClick={() =>
+                  setCollapsedBlocks((current) => {
+                    const next = new Set(current);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  })
+                }
+                aria-label={`${isExpanded ? 'Contraer' : 'Desplegar'} bloque: ${block.name}`}
+                className="flex min-h-11 flex-1 items-center gap-2 rounded-lg text-left text-xs text-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]"
+              >
+                <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                <span aria-live="polite">
+                  {selectedCount} de {block.topics.length} temas seleccionados
+                </span>
+              </button>
               <button
                 type="button"
                 className="min-h-11 rounded-lg px-2 text-sm font-semibold text-[#a82f2c] hover:underline focus-visible:outline-2 focus-visible:outline-[#bd3734]"
@@ -52,7 +74,7 @@ export function TestTopicSelection({
                 {allSelected ? 'Desmarcar bloque' : 'Seleccionar bloque'}
               </button>
             </div>
-            <div className="space-y-2">
+            <div id={contentId} hidden={!isExpanded} className="space-y-2">
               {block.topics.map((topic) => (
                 <label
                   key={topic.id}

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+﻿import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { useState } from 'react';
 import { TestTopicSelection } from './test-topic-selection';
@@ -59,9 +59,24 @@ it('selects each block independently and keeps individual topic selection', () =
   expect(
     general.getAllByRole('checkbox').every((input) => (input as HTMLInputElement).checked),
   ).toBe(true);
+  const toggle = general.getByRole('button', { name: 'Contraer bloque: Parte general' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(general.queryAllByRole('checkbox')).toHaveLength(0);
+  expect(specific.getByRole('checkbox')).toBeVisible();
+  expect(general.getByText('2 de 2 temas seleccionados')).toBeVisible();
+  fireEvent.click(general.getByRole('button', { name: 'Desmarcar bloque: Parte general' }));
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(
+    general.getAllByRole('checkbox').every((input) => !(input as HTMLInputElement).checked),
+  ).toBe(true);
+  expect(specific.getByRole('checkbox')).toBeChecked();
 });
 
 it('explains when no topics are available', () => {
   render(<TestTopicSelection topics={[]} selectedIds={[]} onChange={() => {}} />);
   expect(screen.getByText('No hay temas disponibles en esta convocatoria.')).toBeInTheDocument();
 });
+

@@ -2,7 +2,8 @@ import { ContactForm } from '@/components/contact-form';
 
 export const metadata = {
   title: 'Contacto',
-  description: 'Envíanos tu consulta sobre OposNavarra, las convocatorias o las modalidades de suscripción.',
+  description:
+    'Envíanos tu consulta sobre OposNavarra, las convocatorias o las modalidades de suscripción.',
 };
 
 export default function ContactPage() {
@@ -15,12 +16,16 @@ export default function ContactPage() {
             Envíanos tu consulta
           </h1>
           <p className="mt-5 max-w-lg text-lg text-[var(--muted)]">
-            Si tienes dudas sobre la plataforma, las convocatorias o la suscripción, te responderemos a la dirección que indiques.
+            Si tienes dudas sobre la plataforma, las convocatorias o la suscripción, deja aquí tu
+            consulta. La guardaremos para que el equipo de OposNavarra pueda revisarla.
           </p>
           <div className="mt-8 rounded-[2rem] border border-[var(--line)] bg-[rgba(22,31,29,0.03)] p-6 text-sm text-[var(--muted)]">
-            <p className="font-sans font-semibold uppercase tracking-[0.12em] text-[var(--ink)]">Importante</p>
+            <p className="font-sans font-semibold uppercase tracking-[0.12em] text-[var(--ink)]">
+              Importante
+            </p>
             <p className="mt-3">
-              Este formulario no contrata una suscripción ni activa acceso. Se utiliza para consultas generales sobre el producto y la plataforma.
+              Este formulario no contrata una suscripción ni activa acceso. Se utiliza para
+              consultas generales sobre el producto y la plataforma.
             </p>
           </div>
         </div>

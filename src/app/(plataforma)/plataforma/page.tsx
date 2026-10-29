@@ -19,7 +19,19 @@ function formatDate(date: string | null) {
   }).format(new Date(date));
 }
 
-export default async function PlatformPage() {
+export default async function PlatformPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ section?: string }>;
+}) {
+  const { section } = await searchParams;
+  const initialTab =
+    section === 'crear' ||
+    section === 'oficiales' ||
+    section === 'curso' ||
+    section === 'resultados'
+      ? section
+      : undefined;
   const supabase = await createClient();
   const {
     data: { user },
@@ -129,6 +141,7 @@ export default async function PlatformPage() {
 
   const accountPanel = (
     <div className="space-y-4 text-sm">
+      <Link href="/prueba-gratis/resultados" className="inline-block underline">Mis pruebas gratuitas guardadas</Link>
       <section className="rounded-xl border border-[var(--line)] bg-[#f8f7f3] p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
           Estado de acceso
@@ -215,6 +228,7 @@ export default async function PlatformPage() {
       accountEmail={user.email ?? ''}
       accountPanel={accountPanel}
       canPractice={hasActiveAccess}
+      initialTab={initialTab}
     />
   );
 }

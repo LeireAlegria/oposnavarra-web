@@ -40,7 +40,9 @@ const resultSchema = z.object({
   byTopic: z.array(resultByTopicSchema),
 });
 
-const attemptSummarySchema = z.object({
+export const attemptSummarySchema = z.object({
+  pathId: z.string().uuid().optional(),
+  pathChallengeId: z.string().uuid().optional(),
   challengeId: z.string().uuid().optional(),
   challengeTitle: z.string().optional(),
   challengeClosed: z.boolean().optional(),
@@ -66,10 +68,12 @@ const questionOptionSchema = z.object({
   isCorrect: z.boolean().optional(),
 });
 
-const attemptQuestionSchema = z.object({
+export const attemptQuestionSchema = z.object({
   id: z.string().uuid(),
   order: z.number().int().positive(),
   text: z.string(),
+  explanation: z.string().nullable().optional(),
+  contentChanged: z.boolean().optional(),
   selectedAnswerId: z.string().uuid().nullable(),
   status: z.enum(['correcta', 'incorrecta', 'en_blanco']).nullable(),
   topics: z.array(topicSchema),

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { TestTopicSelection } from './test-topic-selection';
+import { TestAnswerOptions } from './test-answer-options';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -33,6 +34,7 @@ type TestPlatformProps = {
   canPractice: boolean;
   initialAttemptId?: string;
   challengeId?: string;
+  initialTab?: TabKey;
 };
 
 function formatSeconds(seconds: number) {
@@ -74,9 +76,12 @@ export function TestPlatform({
   canPractice,
   initialAttemptId,
   challengeId,
+  initialTab,
 }: TestPlatformProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabKey>(() => (canPractice ? 'crear' : 'resultados'));
+  const [activeTab, setActiveTab] = useState<TabKey>(() =>
+    canPractice ? (initialTab ?? 'crear') : 'resultados',
+  );
   const [convocations, setConvocations] = useState<TestConvocation[]>([]);
   const [officialExams, setOfficialExams] = useState<TestOfficialExam[]>([]);
   const [convocationId, setConvocationId] = useState('');
@@ -196,7 +201,7 @@ export function TestPlatform({
             const attempt = await getTestAttempt(inProgress[0].id);
             if (!isCurrent) return;
             setActiveAttempt(attempt);
-            setActiveTab('curso');
+            if (!initialTab) setActiveTab('curso');
             setCurrentQuestionIndex(0);
           }
         }
@@ -217,7 +222,7 @@ export function TestPlatform({
     return () => {
       isCurrent = false;
     };
-  }, [canPractice, initialAttemptId, challengeId, router]);
+  }, [canPractice, initialAttemptId, challengeId, initialTab, router]);
 
   useEffect(() => {
     if (challengeId || !canPractice || !convocationId) {
@@ -471,6 +476,10 @@ export function TestPlatform({
   };
 
   const handleOpenAttempt = async (attempt: TestAttemptSummary) => {
+    if (attempt.pathChallengeId) {
+      router.push('/mi-camino?attempt=' + attempt.id);
+      return;
+    }
     setIsLoadingAttempt(true);
     setErrorMessage('');
     try {
@@ -574,11 +583,23 @@ export function TestPlatform({
             </p>
           </div>
           <nav aria-label="Navegación de la plataforma" className="mt-5 grid gap-1">
+            <p className="mb-2 px-3 font-sans text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+              Apartados
+            </p>
+            <Link
+              href="/mi-camino"
+              className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left font-sans text-sm text-[var(--muted)] hover:bg-white"
+            >
+              ◇ Mi camino
+            </Link>
             <Link
               href={challengeId ? `/retos/${challengeId}` : '/retos'}
-              className="min-h-11 rounded-lg px-3 py-3 text-sm font-semibold text-[#bd3734]"
+              className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left font-sans text-sm text-[var(--muted)] transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734]"
             >
-              {challengeId ? '← Volver al reto' : 'Retos compartidos'}
+              <span aria-hidden="true" className="text-lg leading-none">
+                {challengeId ? '←' : '⚑'}
+              </span>
+              {challengeId ? 'Volver al reto' : 'Retos compartidos'}
             </Link>
             {(challengeId
               ? []
@@ -656,14 +677,16 @@ export function TestPlatform({
                 <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
                   Convocatoria: {activeAttempt.convocationName}
                 </span>
-                {selectedTopicNames.map((topicName) => (
-                  <span
-                    key={topicName}
-                    className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs"
-                  >
-                    {topicName}
-                  </span>
-                ))}
+                {!challengeId &&
+                  !activeAttempt.challengeId &&
+                  selectedTopicNames.map((topicName) => (
+                    <span
+                      key={topicName}
+                      className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs"
+                    >
+                      {topicName}
+                    </span>
+                  ))}
                 <span className="rounded-full border border-[var(--line)] bg-white px-3 py-1.5 text-xs">
                   {activeAttempt.questions.length} preguntas
                 </span>
@@ -1151,90 +1174,12 @@ export function TestPlatform({
                               </h3>
                             </div>
 
-                            <fieldset className="grid gap-3">
-                              <legend className="sr-only">
-                                {activeAttempt.status === 'finalized'
-                                  ? 'Respuestas y corrección'
-                                  : 'Selecciona una respuesta'}
-                              </legend>
-                              {currentQuestion.options.map((option, optionIndex) => {
-                                const selected = currentQuestion.selectedAnswerId === option.id;
-                                const showCorrection = activeAttempt.status === 'finalized';
-                                const isCorrectAnswer = showCorrection && option.isCorrect === true;
-                                const isSelectedIncorrect =
-                                  showCorrection && selected && option.isCorrect === false;
-                                return (
-                                  <button
-                                    key={option.id}
-                                    type="button"
-                                    aria-pressed={selected}
-                                    disabled={
-                                      !canPractice ||
-                                      showCorrection ||
-                                      isSavingAnswer ||
-                                      isFinalizingAttempt
-                                    }
-                                    onClick={() => handleAnswerSelection(option.id)}
-                                    className={[
-                                      'flex min-h-[68px] items-center gap-4 rounded-lg border px-4 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#bd3734] disabled:cursor-default sm:px-5',
-                                      isCorrectAnswer
-                                        ? 'border-2 border-emerald-700 bg-emerald-50 text-[#302f2b]'
-                                        : isSelectedIncorrect
-                                          ? 'border-2 border-[#bd3734] bg-[#fbefec] text-[#302f2b]'
-                                          : selected
-                                            ? 'border-2 border-[#c43b38] bg-[#fbefec] text-[#302f2b]'
-                                            : 'border-[var(--line)] bg-white text-[#302f2b] hover:border-[#c43b38]',
-                                    ].join(' ')}
-                                  >
-                                    <span
-                                      className={[
-                                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-sans text-sm font-semibold',
-                                        isCorrectAnswer
-                                          ? 'bg-emerald-700 text-white'
-                                          : selected
-                                            ? 'bg-[#bd3734] text-white'
-                                            : 'bg-[#f6f5f0] text-[var(--muted)]',
-                                      ].join(' ')}
-                                    >
-                                      {String.fromCharCode(65 + optionIndex)}
-                                    </span>
-                                    <span className="flex-1 text-sm leading-6 sm:text-base">
-                                      {option.text}
-                                    </span>
-                                    {showCorrection && isCorrectAnswer ? (
-                                      <span className="text-xs font-semibold text-emerald-800">
-                                        Correcta
-                                      </span>
-                                    ) : null}
-                                    {showCorrection && isSelectedIncorrect ? (
-                                      <span className="text-xs font-semibold text-[#a82f2c]">
-                                        Tu respuesta
-                                      </span>
-                                    ) : null}
-                                    <span
-                                      aria-hidden="true"
-                                      className={[
-                                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
-                                        isCorrectAnswer
-                                          ? 'border-emerald-700'
-                                          : selected
-                                            ? 'border-[#bd3734]'
-                                            : 'border-[#deded7]',
-                                      ].join(' ')}
-                                    >
-                                      {selected || isCorrectAnswer ? (
-                                        <span
-                                          className={[
-                                            'h-2.5 w-2.5 rounded-full',
-                                            isCorrectAnswer ? 'bg-emerald-700' : 'bg-[#bd3734]',
-                                          ].join(' ')}
-                                        />
-                                      ) : null}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </fieldset>
+                            <TestAnswerOptions
+                              question={currentQuestion}
+                              showCorrection={activeAttempt.status === 'finalized'}
+                              disabled={!canPractice || isSavingAnswer || isFinalizingAttempt}
+                              onAnswer={handleAnswerSelection}
+                            />
 
                             <p className="text-sm text-[var(--muted)]" aria-live="polite">
                               {isSavingAnswer
@@ -1522,8 +1467,12 @@ export function TestPlatform({
                       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
                           <p className="font-sans text-xs font-bold uppercase tracking-[0.14em] text-[#bd3734]">
-                            {attempt.challengeId ? 'Reto' : 'Resultado'} ·{' '}
-                            {formatDate(attempt.startedAt)}
+                            {attempt.pathChallengeId
+                              ? 'Mi camino'
+                              : attempt.challengeId
+                                ? 'Reto'
+                                : 'Resultado'}{' '}
+                            · {formatDate(attempt.startedAt)}
                           </p>
                           <h2 className="mt-2 font-serif text-3xl font-normal">
                             {attempt.result?.porcentajeAciertos ?? 0} %
