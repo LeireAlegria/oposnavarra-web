@@ -2676,6 +2676,9 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           ].join(' ')}
         >
           <nav aria-label="Navegación administrativa" className="space-y-6">
+            <a href="/admin/mensajes" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Mensajes de contacto</a>
+            <a href="/admin/prueba-gratis" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Prueba gratuita</a>
+            <a href="/admin/caminos" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Caminos de aprendizaje</a>
             {navGroups.map((group) => (
               <div key={group.title}>
                 <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#99958c]">

@@ -18,7 +18,7 @@ Si el modelo o comportamiento necesario no existe o es ambiguo, documentar la de
 
 3. Acceso y protección de datos
 
-La parte pública explica qué ofrece OposNavarra y qué oposiciones cuentan con tests. Su navegación debe conducir al registro y al inicio de sesión. Configurar y realizar tests, consultar intentos y acceder al panel requiere autenticación. El correo debe estar confirmado antes de iniciar un test.
+La parte pública explica qué ofrece OposNavarra y qué oposiciones cuentan con tests. Su navegación debe conducir al registro y al inicio de sesión. Configurar y realizar tests ordinarios, consultar intentos y acceder al panel requiere autenticación. El correo debe estar confirmado antes de iniciar un test ordinario. Como excepción definida en la spec 017, la demostración pública permite practicar exactamente cinco preguntas de un conjunto versionado sin autenticación, obtener correcciones del servidor y recuperar el resultado mediante una credencial opaca con vigencia de 24 horas. Sus resultados se guardan de forma separada y no conceden permisos de suscripción.
 
 Solo la cuenta con permisos de administración puede acceder a las operaciones del panel. Las restricciones visuales de la web no sustituyen las políticas de acceso y autorización de Supabase.
 

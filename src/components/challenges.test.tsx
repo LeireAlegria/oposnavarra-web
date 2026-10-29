@@ -75,5 +75,18 @@ describe('challenge screens', () => {
     render(<Challenges authenticated canCreate={false} />);
     await screen.findByText(/No hay retos en esta vista/);
     expect(screen.getByRole('button', { name: 'Crear reto' })).toBeDisabled();
+    const navigation = screen.getByRole('navigation', { name: 'Navegación de la plataforma' });
+    expect(navigation.querySelector('[aria-current="page"]')).toHaveTextContent(
+      'Retos compartidos',
+    );
+    expect(screen.getByRole('link', { name: /Test oficiales/ })).toHaveAttribute(
+      'href',
+      '/plataforma?section=oficiales',
+    );
+    const toggle = screen.getByRole('button', { name: 'Abrir navegación' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('link', { name: /Test oficiales/ }));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 });

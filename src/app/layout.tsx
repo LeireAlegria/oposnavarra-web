@@ -3,8 +3,10 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
+  referrer: 'no-referrer',
   title: { default: 'OposNavarra | Tests para oposiciones', template: '%s | OposNavarra' },
-  description: 'Plataforma para preparar oposiciones de Navarra con tests, seguimiento y suscripción global.',
+  description:
+    'Plataforma para preparar oposiciones de Navarra con tests, seguimiento y suscripción global.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

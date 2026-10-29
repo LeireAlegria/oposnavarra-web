@@ -30,6 +30,8 @@ export function ContactForm() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
+    const honeypot = new FormData(event.currentTarget).get('website') ?? '';
     setIsSubmitting(true);
     setStatusMessage(null);
     setStatusType(null);
@@ -42,16 +44,19 @@ export function ContactForm() {
 
     const nextErrors: FormErrors = {};
 
-    if (trimmedValues.name.length < 1 || trimmedValues.name.length > 100) {
-      nextErrors.name = 'El nombre debe tener entre 1 y 100 caracteres.';
+    if (trimmedValues.name.length < 1 || trimmedValues.name.length > 120) {
+      nextErrors.name = 'El nombre debe tener entre 1 y 120 caracteres.';
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValues.email) || trimmedValues.email.length > 254) {
+    if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValues.email) ||
+      trimmedValues.email.length > 254
+    ) {
       nextErrors.email = 'Introduce un correo electrónico válido.';
     }
 
-    if (trimmedValues.message.length < 10 || trimmedValues.message.length > 5000) {
-      nextErrors.message = 'El mensaje debe tener entre 10 y 5.000 caracteres.';
+    if (trimmedValues.message.length < 1 || trimmedValues.message.length > 5000) {
+      nextErrors.message = 'El mensaje debe tener entre 1 y 5.000 caracteres.';
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -64,7 +69,7 @@ export function ContactForm() {
       const response = await fetch('/api/contacto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...trimmedValues, honeypot: '' }),
+        body: JSON.stringify({ ...trimmedValues, honeypot }),
       });
 
       const data = (await response.json()) as { message?: string; errors?: Record<string, string> };
@@ -105,7 +110,10 @@ export function ContactForm() {
       </div>
 
       <div>
-        <label htmlFor="name" className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]">
+        <label
+          htmlFor="name"
+          className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]"
+        >
           Nombre
         </label>
         <input
@@ -116,15 +124,20 @@ export function ContactForm() {
           aria-invalid={Boolean(errors.name)}
           aria-describedby={errors.name ? 'name-error' : undefined}
           className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-base text-[var(--ink)] outline-none transition-colors focus:border-[var(--coral)] focus:ring-2 focus:ring-[rgba(243,111,94,0.2)]"
-          maxLength={100}
+          maxLength={120}
         />
         {errors.name ? (
-          <p id="name-error" className="mt-2 text-sm text-red-700">{errors.name}</p>
+          <p id="name-error" className="mt-2 text-sm text-red-700">
+            {errors.name}
+          </p>
         ) : null}
       </div>
 
       <div>
-        <label htmlFor="email" className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]">
+        <label
+          htmlFor="email"
+          className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]"
+        >
           Correo electrónico
         </label>
         <input
@@ -138,12 +151,17 @@ export function ContactForm() {
           maxLength={254}
         />
         {errors.email ? (
-          <p id="email-error" className="mt-2 text-sm text-red-700">{errors.email}</p>
+          <p id="email-error" className="mt-2 text-sm text-red-700">
+            {errors.email}
+          </p>
         ) : null}
       </div>
 
       <div>
-        <label htmlFor="message" className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]">
+        <label
+          htmlFor="message"
+          className="mb-2 block font-sans text-sm font-medium text-[var(--ink)]"
+        >
           Mensaje
         </label>
         <textarea
@@ -157,15 +175,22 @@ export function ContactForm() {
           maxLength={5000}
         />
         {errors.message ? (
-          <p id="message-error" className="mt-2 text-sm text-red-700">{errors.message}</p>
+          <p id="message-error" className="mt-2 text-sm text-red-700">
+            {errors.message}
+          </p>
         ) : null}
       </div>
 
       <p className="text-sm text-[var(--muted)]">
-        Se usará para responder a tu consulta y gestionar la comunicación relacionada con el producto. Consulta nuestra{' '}
-        <a href="/politica-privacidad" className="font-medium text-[var(--coral)] underline underline-offset-2">
+        Se usará para responder a tu consulta y gestionar la comunicación relacionada con el
+        producto. Consulta nuestra{' '}
+        <a
+          href="/politica-privacidad"
+          className="font-medium text-[var(--coral)] underline underline-offset-2"
+        >
           política de privacidad
-        </a>.
+        </a>
+        .
       </p>
 
       {statusMessage ? (

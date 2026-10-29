@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import { getSupabaseConfig } from './config';
+import { getSafeInternalPath } from '@/lib/navigation';
 
 export async function updateSession(request: NextRequest) {
   const { url, publishableKey } = getSupabaseConfig();
@@ -30,8 +31,14 @@ export async function updateSession(request: NextRequest) {
     error,
   } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname;
-  const protectedPaths = ['/plataforma', '/admin'];
-  const authPaths = ['/acceder', '/registro', '/recuperar-contrasena', '/nueva-contrasena', '/verificar-correo'];
+  const protectedPaths = ['/plataforma', '/admin', '/mi-camino'];
+  const authPaths = [
+    '/acceder',
+    '/registro',
+    '/recuperar-contrasena',
+    '/nueva-contrasena',
+    '/verificar-correo',
+  ];
 
   if (protectedPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     if (error || !user) {
@@ -58,7 +65,9 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (authPaths.includes(pathname) && user && user.email_confirmed_at) {
-    return NextResponse.redirect(new URL('/plataforma', request.url));
+    return NextResponse.redirect(
+      new URL(getSafeInternalPath(request.nextUrl.searchParams.get('next')), request.url),
+    );
   }
 
   return response;
