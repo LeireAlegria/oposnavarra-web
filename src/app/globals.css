@@ -231,5 +231,62 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
+  html {
+    scroll-behavior: auto;
+  }
+}
+/* Keep the standalone administration editors aligned with the catalog controls. */
+.admin-shell nav[aria-label='Navegación administrativa'] :is(a, button) {
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.admin-shell nav[aria-label='Navegación administrativa'] [aria-current='page'] {
+  font-weight: 600;
+}
+
+.admin-extension :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  min-height: 2.75rem;
+  border: 1px solid #e5e1d8;
+  border-radius: 0.5rem;
+  background-color: #fdfcf9;
+  padding: 0.625rem 0.75rem;
+  max-width: 100%;
+}
+
+.admin-extension :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid #bd3734;
+  outline-offset: 3px;
+}
+
+.admin-extension button {
+  min-height: 2.75rem;
+  border-color: #e5e1d8;
+  background-color: white;
+  color: #393833;
+  font-weight: 600;
+}
+
+.admin-extension button:enabled:hover {
+  background-color: #f8f7f3;
+  border-color: #bd3734;
+}
+
+.admin-extension :is(section, article, li).border {
+  border-color: #e5e1d8;
+  border-radius: 1rem;
+}
+
+.admin-extension h2 {
+  color: #302f2b;
+  font-weight: 600;
+}
+
+.admin-extension [role='alert'] {
+  border: 1px solid #e7c4c1;
+  border-radius: 0.75rem;
+  background: #fff5f4;
+  color: #8b2926;
+  padding: 0.75rem 1rem;
 }
