@@ -234,7 +234,21 @@ function formatUserDate(value: string | null | undefined, fallback: string): str
   }).format(new Date(value));
 }
 
-export function AdminConsole({ adminEmail }: { adminEmail: string }) {
+type AdminExtension = {
+  href: string;
+  title: string;
+  description: string;
+  content: React.ReactNode;
+};
+export function AdminConsole({
+  adminEmail,
+  extension,
+}: {
+  adminEmail: string;
+  extension?: AdminExtension;
+}) {
+  const [extensionOpen, setExtensionOpen] = useState(Boolean(extension));
+  const currentExtension = extensionOpen ? extension : undefined;
   const router = useRouter();
   const [activeSection, setActiveSection] = useState<SectionKey>('resumen');
   const [importExamFilter, setImportExamFilter] = useState('');
@@ -404,8 +418,8 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   }, [supabase]);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    if (!currentExtension) void loadData();
+  }, [loadData, currentExtension]);
 
   useEffect(() => {
     if (
@@ -1109,6 +1123,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
   const editingPlan = planes.find((item) => item.id === editingPlanId);
 
   const changeSection = (section: SectionKey) => {
+    setExtensionOpen(false);
     setCatalogView('list');
     setErrorMessage('');
     setActiveSection(section);
@@ -2676,9 +2691,6 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           ].join(' ')}
         >
           <nav aria-label="Navegación administrativa" className="space-y-6">
-            <a href="/admin/mensajes" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Mensajes de contacto</a>
-            <a href="/admin/prueba-gratis" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Prueba gratuita</a>
-            <a href="/admin/caminos" className="block rounded-lg px-3 py-3 text-sm font-semibold text-[#b83431]">Caminos de aprendizaje</a>
             {navGroups.map((group) => (
               <div key={group.title}>
                 <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#99958c]">
@@ -2690,10 +2702,10 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                       key={key}
                       type="button"
                       onClick={() => changeSection(key)}
-                      aria-current={activeSection === key ? 'page' : undefined}
+                      aria-current={!currentExtension && activeSection === key ? 'page' : undefined}
                       className={[
                         'flex min-h-10 items-center gap-3 rounded-lg px-3 text-left text-sm transition-colors',
-                        activeSection === key
+                        !currentExtension && activeSection === key
                           ? 'bg-[#f8eae7] font-semibold text-[#b83431]'
                           : 'text-[#67655f] hover:bg-white hover:text-[#302f2b]',
                       ].join(' ')}
@@ -2721,6 +2733,35 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                 </div>
               </div>
             ))}
+            <div>
+              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#99958c]">
+                Otros
+              </p>
+              <div className="grid gap-1">
+                {[
+                  { href: '/admin/mensajes', title: 'Mensajes de contacto', icon: '✉' },
+                  { href: '/admin/prueba-gratis', title: 'Prueba gratuita', icon: '?' },
+                  { href: '/admin/caminos', title: 'Caminos de aprendizaje', icon: '↱' },
+                ].map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    aria-current={currentExtension?.href === item.href ? 'page' : undefined}
+                    className={[
+                      'flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                      currentExtension?.href === item.href
+                        ? 'bg-[#f8eae7] font-semibold text-[#b83431]'
+                        : 'text-[#67655f] hover:bg-white hover:text-[#302f2b]',
+                    ].join(' ')}
+                  >
+                    <span aria-hidden="true" className="w-5 shrink-0 text-center text-base">
+                      {item.icon}
+                    </span>
+                    {item.title}
+                  </a>
+                ))}
+              </div>
+            </div>
           </nav>
           <p className="mt-10 border-t border-[#e5e1d8] px-3 pt-5 text-xs leading-5 text-[#8b887f]">
             Gestión segura del contenido y las cuentas de OposNavarra.
@@ -2731,22 +2772,25 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
           <div className="mb-7 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <p className="mb-2 text-xs text-[#8b887f]">
-                Administración <span className="mx-2">/</span> {sectionLabels[activeSection]}
+                Administración <span className="mx-2">/</span>{' '}
+                {currentExtension?.title ?? sectionLabels[activeSection]}
               </p>
               <h1
                 ref={catalogHeadingRef}
                 tabIndex={-1}
                 className="outline-none font-serif text-3xl font-normal tracking-[-0.04em] text-[#302f2b] sm:text-4xl"
               >
-                {isCatalogForm
-                  ? `${isEditingCatalog ? 'Editar' : 'Crear'} ${catalogEntityLabel}`
-                  : pageTitles[activeSection]}
+                {currentExtension
+                  ? currentExtension.title
+                  : isCatalogForm
+                    ? `${isEditingCatalog ? 'Editar' : 'Crear'} ${catalogEntityLabel}`
+                    : pageTitles[activeSection]}
               </h1>
               <p className="mt-2 max-w-2xl text-sm text-[#77756e]">
-                {pageDescriptions[activeSection]}
+                {currentExtension?.description ?? pageDescriptions[activeSection]}
               </p>
             </div>
-            {isCatalogSection ? (
+            {!currentExtension && isCatalogSection ? (
               <button
                 type="button"
                 onClick={() =>
@@ -2757,7 +2801,7 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
                 {isCatalogForm ? 'Volver al listado' : `+ Crear ${catalogEntityLabel}`}
               </button>
             ) : null}
-            {activeSection === 'resumen' ? (
+            {!currentExtension && activeSection === 'resumen' ? (
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -2777,134 +2821,144 @@ export function AdminConsole({ adminEmail }: { adminEmail: string }) {
             ) : null}
           </div>
 
-          {activeSection !== 'resumen' && !isCatalogForm ? (
-            <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#e5e1d8] bg-white p-4 md:flex-row md:items-center">
-              <label className="relative min-w-0 flex-1">
-                <span className="sr-only">
-                  Buscar en {pageTitles[activeSection].toLocaleLowerCase('es')}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#99958c]"
-                >
-                  ⌕
-                </span>
-                <input
-                  value={searchTerm}
-                  onChange={(event) => {
-                    setSearchTerm(event.target.value);
-                    setCurrentPage(1);
-                  }}
-                  placeholder={
-                    activeSection === 'usuarios'
-                      ? 'Buscar por ID de usuario...'
-                      : `Buscar ${pageTitles[activeSection].toLocaleLowerCase('es')}...`
-                  }
-                  className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-[#fdfcf9] pl-9 pr-3 text-sm"
-                />
-              </label>
-              {filterOptions[activeSection].length > 0 ? (
-                <label className="flex min-h-11 items-center gap-2 text-sm">
-                  <span className="sr-only">Filtrar por estado</span>
-                  <select
-                    value={activeFilter}
-                    onChange={(event) => {
-                      setActiveFilter(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
-                  >
-                    {filterOptions[activeSection].map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              {activeSection === 'suscripciones' ? (
-                <label className="flex min-h-11 items-center gap-2 text-sm">
-                  <span className="sr-only">Filtrar por plan</span>
-                  <select
-                    value={planFilter}
-                    onChange={(event) => {
-                      setPlanFilter(event.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
-                  >
-                    <option value="">Todos los planes</option>
-                    {planes.map((plan) => (
-                      <option key={plan.id} value={plan.id}>
-                        {plan.nombre}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-            </div>
-          ) : null}
-
-          {!loading && errorMessage ? (
-            <div
-              role="alert"
-              className="mb-5 flex flex-col gap-3 rounded-xl border border-[#e7c4c1] bg-[#fff5f4] px-4 py-3 text-sm text-[#8b2926] sm:flex-row sm:items-center sm:justify-between"
-            >
-              <span>{errorMessage}</span>
-              <button
-                type="button"
-                onClick={() => void loadData()}
-                className="font-semibold underline"
-              >
-                Reintentar
-              </button>
-            </div>
-          ) : null}
-          {listLoading ? (
-            <p role="status" className="mb-4 text-sm text-[#77756e]">
-              Actualizando resultados…
-            </p>
-          ) : null}
-          {loading ? (
-            <div
-              role="status"
-              className="rounded-2xl border border-[#e5e1d8] bg-white p-10 text-center text-sm text-[#77756e]"
-            >
-              Cargando panel administrativo…
+          {currentExtension ? (
+            <div className="admin-extension rounded-2xl border border-[#e5e1d8] bg-white p-4 text-sm leading-6 sm:p-6">
+              {currentExtension.content}
             </div>
           ) : (
             <>
-              {renderCurrentSection()}
               {activeSection !== 'resumen' && !isCatalogForm ? (
-                <div className="mt-5 flex flex-col gap-3 text-sm text-[#77756e] sm:flex-row sm:items-center sm:justify-between">
-                  <span>
-                    {activeRowCount > 0
-                      ? `Mostrando ${(activePage - 1) * PAGE_SIZE + 1}–${Math.min(activePage * PAGE_SIZE, activeRowCount)} de ${activeRowCount}`
-                      : 'Sin registros'}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={activePage <= 1}
-                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                      className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
-                    >
-                      Anterior
-                    </button>
-                    <span className="min-w-16 text-center">
-                      {activePage} / {activePageCount}
+                <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-[#e5e1d8] bg-white p-4 md:flex-row md:items-center">
+                  <label className="relative min-w-0 flex-1">
+                    <span className="sr-only">
+                      Buscar en {pageTitles[activeSection].toLocaleLowerCase('es')}
                     </span>
-                    <button
-                      type="button"
-                      disabled={activePage >= activePageCount}
-                      onClick={() => setCurrentPage((page) => Math.min(activePageCount, page + 1))}
-                      className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#99958c]"
                     >
-                      Siguiente
-                    </button>
-                  </div>
+                      ⌕
+                    </span>
+                    <input
+                      value={searchTerm}
+                      onChange={(event) => {
+                        setSearchTerm(event.target.value);
+                        setCurrentPage(1);
+                      }}
+                      placeholder={
+                        activeSection === 'usuarios'
+                          ? 'Buscar por ID de usuario...'
+                          : `Buscar ${pageTitles[activeSection].toLocaleLowerCase('es')}...`
+                      }
+                      className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-[#fdfcf9] pl-9 pr-3 text-sm"
+                    />
+                  </label>
+                  {filterOptions[activeSection].length > 0 ? (
+                    <label className="flex min-h-11 items-center gap-2 text-sm">
+                      <span className="sr-only">Filtrar por estado</span>
+                      <select
+                        value={activeFilter}
+                        onChange={(event) => {
+                          setActiveFilter(event.target.value);
+                          setCurrentPage(1);
+                        }}
+                        className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
+                      >
+                        {filterOptions[activeSection].map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {activeSection === 'suscripciones' ? (
+                    <label className="flex min-h-11 items-center gap-2 text-sm">
+                      <span className="sr-only">Filtrar por plan</span>
+                      <select
+                        value={planFilter}
+                        onChange={(event) => {
+                          setPlanFilter(event.target.value);
+                          setCurrentPage(1);
+                        }}
+                        className="min-h-11 w-full rounded-lg border border-[#e5e1d8] bg-white px-3 text-sm md:w-auto"
+                      >
+                        <option value="">Todos los planes</option>
+                        {planes.map((plan) => (
+                          <option key={plan.id} value={plan.id}>
+                            {plan.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
+
+              {!loading && errorMessage ? (
+                <div
+                  role="alert"
+                  className="mb-5 flex flex-col gap-3 rounded-xl border border-[#e7c4c1] bg-[#fff5f4] px-4 py-3 text-sm text-[#8b2926] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span>{errorMessage}</span>
+                  <button
+                    type="button"
+                    onClick={() => void loadData()}
+                    className="font-semibold underline"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              ) : null}
+              {listLoading ? (
+                <p role="status" className="mb-4 text-sm text-[#77756e]">
+                  Actualizando resultados…
+                </p>
+              ) : null}
+              {loading ? (
+                <div
+                  role="status"
+                  className="rounded-2xl border border-[#e5e1d8] bg-white p-10 text-center text-sm text-[#77756e]"
+                >
+                  Cargando panel administrativo…
+                </div>
+              ) : (
+                <>
+                  {renderCurrentSection()}
+                  {activeSection !== 'resumen' && !isCatalogForm ? (
+                    <div className="mt-5 flex flex-col gap-3 text-sm text-[#77756e] sm:flex-row sm:items-center sm:justify-between">
+                      <span>
+                        {activeRowCount > 0
+                          ? `Mostrando ${(activePage - 1) * PAGE_SIZE + 1}–${Math.min(activePage * PAGE_SIZE, activeRowCount)} de ${activeRowCount}`
+                          : 'Sin registros'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={activePage <= 1}
+                          onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                          className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
+                        >
+                          Anterior
+                        </button>
+                        <span className="min-w-16 text-center">
+                          {activePage} / {activePageCount}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={activePage >= activePageCount}
+                          onClick={() =>
+                            setCurrentPage((page) => Math.min(activePageCount, page + 1))
+                          }
+                          className="min-h-10 rounded-lg border border-[#e5e1d8] bg-white px-3 disabled:opacity-40"
+                        >
+                          Siguiente
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </>
           )}
         </section>
